@@ -3,7 +3,7 @@ import { ArrowRight, Building2, Cpu, FileText, ScanLine, Video, type LucideIcon 
 
 const featureCards: Array<{ title: string; text: string; Icon: LucideIcon }> = [
   { title: "Inspection", text: "Review capture quality, surface concerns, and progress remotely.", Icon: ScanLine },
-  { title: "Renovation", text: "Mark potential renovation zones and share model-backed summaries.", Icon: FileText },
+  { title: "Renovation", text: "Mark potential renovation zones and share capture-backed summaries.", Icon: FileText },
   { title: "Progress Tracking", text: "Prepare the pipeline for repeat captures on active construction sites.", Icon: Video }
 ];
 
@@ -11,9 +11,9 @@ const pipeline = [
   "Phone Photos / Video",
   "Upload Service",
   "Frame Extraction",
-  "3D Reconstruction",
-  "GLB Model Export",
-  "Interactive Viewer",
+  "COLMAP Sparse Reconstruction",
+  "Sparse Point Cloud Preview",
+  "Viewer + Report",
   "AI Annotations & Reports"
 ];
 
@@ -35,17 +35,17 @@ export default function LandingPage() {
       <section className="mx-auto grid min-h-[74vh] max-w-7xl items-center gap-10 py-12 lg:grid-cols-[1.05fr_0.95fr]">
         <div>
           <div className="mb-5 inline-flex rounded-full border border-brand/25 bg-brand/10 px-3 py-1 text-xs font-medium text-cyan-100">
-            Controlled interior MVP, building-scale roadmap
+            Local capture to sparse reconstruction prototype
           </div>
           <h1 className="max-w-4xl text-5xl font-semibold tracking-normal text-white md:text-7xl">
             Structura AI
           </h1>
           <p className="mt-5 max-w-2xl text-2xl text-cyan-100">
-            From building photos to interactive digital twins.
+            Local capture to sparse building previews.
           </p>
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">
-            Structura AI converts photos and videos of buildings into interactive digital twins for inspection,
-            renovation, and construction progress tracking.
+            Structura AI converts photos and videos into COLMAP sparse point cloud previews for inspection,
+            renovation, and construction progress review.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/projects/new" className="inline-flex items-center gap-2 rounded-md bg-brand px-5 py-3 font-semibold text-ink hover:bg-cyan-200">
@@ -61,8 +61,8 @@ export default function LandingPage() {
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-5">
             <div className="mb-5 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">Digital twin preview</p>
-                <p className="text-xs text-slate-400">Interior scan prototype</p>
+                <p className="text-sm font-medium text-white">Sparse preview prototype</p>
+                <p className="text-xs text-slate-400">Building scan workflow</p>
               </div>
               <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">Ready</span>
             </div>
@@ -95,8 +95,8 @@ export default function LandingPage() {
           <div className="mb-6 flex items-center gap-3">
             <Cpu className="text-brand" size={22} />
             <div>
-              <h2 className="text-xl font-semibold text-white">Future Reconstruction Pipeline</h2>
-              <p className="text-sm text-slate-400">Built now as a simulation, structured for real reconstruction later.</p>
+              <h2 className="text-xl font-semibold text-white">Reconstruction Pipeline</h2>
+              <p className="text-sm text-slate-400">Built around real local processing, COLMAP sparse reconstruction, and honest prototype limitations.</p>
             </div>
           </div>
           <div className="grid gap-3 lg:grid-cols-7">
@@ -108,7 +108,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-5 text-sm text-slate-400">
-            Future integrations: FFmpeg, COLMAP, OpenMVS, Blender CLI, and Segment Anything / object detection.
+            Current pipeline: FFmpeg, frame selection, COLMAP sparse reconstruction, attempt tracking, sparse viewer, and cached reports.
           </p>
         </div>
       </section>

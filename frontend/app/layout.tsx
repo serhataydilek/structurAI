@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Structura AI",
-  description: "From building photos to interactive digital twins."
+  description: "Local capture to COLMAP sparse point cloud previews."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -376,7 +376,7 @@ export default function ProcessingPage() {
                 <h2 className="text-lg font-semibold text-white">Sparse Reconstruction</h2>
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Sparse reconstruction runs COLMAP feature extraction, matching, and mapper. Dense reconstruction can create a denser point cloud, but it is still not a mesh or final digital twin.
+                Sparse reconstruction runs COLMAP feature extraction, matching, and mapper. Dense reconstruction can create a denser point cloud, but it is still not a mesh or finished production model.
               </p>
             </div>
             <button

@@ -12,7 +12,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
             <span>
               <span className="block text-sm font-semibold tracking-wide text-white">Structura AI</span>
-              <span className="block text-xs text-slate-400">Digital twin capture platform</span>
+              <span className="block text-xs text-slate-400">Sparse reconstruction prototype</span>
             </span>
           </Link>
           <nav className="flex items-center gap-2 text-sm text-slate-300">

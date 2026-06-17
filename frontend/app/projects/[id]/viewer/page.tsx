@@ -241,7 +241,7 @@ export default function ViewerPage() {
   const hasPointCloud = Boolean(activePointCloud?.available && activePointCloud.points.length > 0);
   const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : activePreviewMode === "exterior" && hasPointCloud ? "Sparse Building Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "No Reconstruction Output Yet";
   const explanation = activePointCloud?.source === "colmap_dense"
-    ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or final digital twin yet."
+    ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or finished production model yet."
     : activePreviewMode === "exterior" && hasPointCloud
       ? "This is a real COLMAP sparse point cloud. Scale and orientation are arbitrary until aligned with the viewer controls."
       : sparseSceneAvailable

@@ -360,7 +360,7 @@ def get_model(project_id: str) -> dict[str, str]:
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if project["status"] != "Ready":
-        raise HTTPException(status_code=409, detail="Digital twin model is not ready yet")
+        raise HTTPException(status_code=409, detail="Sparse point cloud preview is not ready yet")
     return {"modelUrl": "/models/sample-condo.glb"}
 
 

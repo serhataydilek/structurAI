@@ -88,7 +88,7 @@ export default function DashboardPage() {
           <p className="text-sm text-brand">Scan Projects</p>
           <h1 className="mt-2 text-3xl font-semibold text-white">Capture processing dashboard</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            This prototype currently prepares captures for reconstruction. 3D reconstruction is the next pipeline milestone.
+            This prototype prepares captures, runs COLMAP sparse reconstruction, and presents sparse point cloud previews with cached reports.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">

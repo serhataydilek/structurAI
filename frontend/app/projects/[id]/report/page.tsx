@@ -270,7 +270,7 @@ export default function ReportPage() {
             )}
             {report?.detectedOutput === "Sparse scene preview" && (
               <div className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-4 text-sm text-cyan-50">
-                The preview combines sparse COLMAP points with estimated room bounds. It is a readability layer before dense reconstruction or mesh generation, not a final digital twin.
+                The preview combines sparse COLMAP points with estimated room bounds. It is a readability layer before dense reconstruction or mesh generation, not a finished production model.
               </div>
             )}
             <div className="mt-4 grid gap-4 md:grid-cols-2">

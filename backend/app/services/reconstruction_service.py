@@ -1020,7 +1020,7 @@ def _capture_fps_metadata(project_id: str) -> tuple[str, int]:
 
 def _next_action(sparse_status: str, dense_status: str, dense_support_missing: bool = False, sparse_quality_label: str = "Poor Sparse Reconstruction") -> str:
     if dense_status == "Dense Reconstruction Complete":
-        return "Generate mesh / GLB export"
+        return "Review dense point cloud preview"
     if dense_status == "Dense Reconstruction Failed":
         if dense_support_missing:
             return "Continue sparse scene preview or install CUDA-enabled COLMAP"
