@@ -5,10 +5,27 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
-import { PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep } from "@/lib/api";
-import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt } from "@/lib/types";
+import { PointCloudColorMode, PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
+import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, saveAttemptViewerTransform } from "@/lib/api";
+import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, PreviewMode, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt, ViewerTransform } from "@/lib/types";
 import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
+
+const identityViewerTransform: ViewerTransform = {
+  rotationX: 0,
+  rotationY: 0,
+  rotationZ: 0,
+  flipX: false,
+  flipY: false,
+  flipZ: false,
+  scale: 1,
+  offsetX: 0,
+  offsetY: 0,
+  offsetZ: 0
+};
+
+function normalizeViewerTransform(transform?: Partial<ViewerTransform>): ViewerTransform {
+  return { ...identityViewerTransform, ...(transform ?? {}) };
+}
 
 export default function ViewerPage() {
   const params = useParams<{ id: string }>();
@@ -30,10 +47,17 @@ export default function ViewerPage() {
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
   const [viewerMode, setViewerMode] = useState<"auto" | "dense" | "sparse">("auto");
   const [pointSize, setPointSize] = useState<PointCloudPointSize>("Medium");
+  const [pointSizeValue, setPointSizeValue] = useState(0.045);
+  const [pointOpacity, setPointOpacity] = useState(1);
+  const [colorMode, setColorMode] = useState<PointCloudColorMode>("rgb");
+  const [scanPreviewMode, setScanPreviewMode] = useState<PreviewMode>("auto");
+  const [viewerTransform, setViewerTransform] = useState<ViewerTransform>(identityViewerTransform);
+  const [savingViewerTransform, setSavingViewerTransform] = useState(false);
   const [showSparsePoints, setShowSparsePoints] = useState(true);
   const [showRoomBounds, setShowRoomBounds] = useState(true);
   const [showEstimatedFloor, setShowEstimatedFloor] = useState(true);
   const [showCameraPath, setShowCameraPath] = useState(true);
+  const [showBoundingBox, setShowBoundingBox] = useState(false);
   const [showReference, setShowReference] = useState(true);
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
@@ -195,12 +219,24 @@ export default function ViewerPage() {
   const activePointCloud = selectedPointCloud?.available ? selectedPointCloud : pointCloud;
   const sparseSceneAvailable = Boolean(sceneAnalysis?.available && activePointCloud?.source === "colmap_sparse");
   const activeSceneAnalysis = activePointCloud?.source === "colmap_sparse" ? sceneAnalysis : null;
-  const outputType = activePointCloud?.source === "colmap_dense" ? "Dense point cloud preview" : sparseSceneAvailable ? "Sparse scene preview" : activePointCloud?.source === "colmap_sparse" ? "Sparse point cloud preview" : "No reconstruction output";
+  const autoPreviewMode: Exclude<PreviewMode, "auto"> = project?.scan_type === "Building Scan" || ((summary?.imageCount ?? 0) >= 40 && (summary?.videoCount ?? 0) === 0) ? "exterior" : "interior";
+  const activePreviewMode: Exclude<PreviewMode, "auto"> = scanPreviewMode === "auto" ? autoPreviewMode : scanPreviewMode;
+  const outputType = activePointCloud?.source === "colmap_dense"
+    ? "Dense point cloud preview"
+    : activePointCloud?.source === "colmap_sparse" && activePreviewMode === "exterior"
+      ? "Sparse building preview"
+      : sparseSceneAvailable
+        ? "Sparse scene preview"
+        : activePointCloud?.source === "colmap_sparse"
+          ? "Sparse point cloud preview"
+          : "No reconstruction output";
   const hasPointCloud = Boolean(activePointCloud?.available && activePointCloud.points.length > 0);
-  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "No Reconstruction Output Yet";
+  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : activePreviewMode === "exterior" && hasPointCloud ? "Sparse Building Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "No Reconstruction Output Yet";
   const explanation = activePointCloud?.source === "colmap_dense"
     ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or final digital twin yet."
-    : sparseSceneAvailable
+    : activePreviewMode === "exterior" && hasPointCloud
+      ? "This is a real COLMAP sparse point cloud. Scale and orientation are arbitrary until aligned with the viewer controls."
+      : sparseSceneAvailable
       ? "This view uses the real COLMAP sparse reconstruction plus estimated room bounds to make the captured space easier to inspect. It is not a dense mesh yet."
       : hasPointCloud
         ? "This is a real sparse point cloud reconstructed from the uploaded capture. It is not a dense mesh yet."
@@ -230,6 +266,77 @@ export default function ViewerPage() {
     : denseLikelyAvailable === true
       ? "Dense reconstruction support appears available."
       : "Dense reconstruction support is unknown on this machine.";
+
+  useEffect(() => {
+    if (!selectedAttempt) return;
+    setViewerTransform(normalizeViewerTransform(selectedAttempt.viewerTransform));
+    setScanPreviewMode(selectedAttempt.viewerPreviewMode ?? "auto");
+  }, [selectedAttempt?.attemptId, selectedAttempt?.viewerPreviewMode, selectedAttempt?.viewerTransform]);
+
+  useEffect(() => {
+    if (activePreviewMode === "exterior") {
+      setShowEstimatedFloor(false);
+      setShowRoomBounds(false);
+      setShowBoundingBox(true);
+      setShowCameraPath(true);
+      setShowReference(false);
+      setPointSize("Large");
+      setPointSizeValue(0.065);
+    } else {
+      setShowEstimatedFloor(true);
+      setShowRoomBounds(true);
+      setShowBoundingBox(false);
+      setShowCameraPath(true);
+      setShowReference(true);
+      setPointSize("Medium");
+      setPointSizeValue(0.045);
+    }
+  }, [activePreviewMode]);
+
+  function rotate(axis: "rotationX" | "rotationY" | "rotationZ", amount: number) {
+    setViewerTransform((current) => ({ ...current, [axis]: (((current[axis] + amount) % 360) + 360) % 360 }));
+    setViewerResetKey((current) => current + 1);
+  }
+
+  function flip(axis: "flipX" | "flipY" | "flipZ") {
+    setViewerTransform((current) => ({ ...current, [axis]: !current[axis] }));
+    setViewerResetKey((current) => current + 1);
+  }
+
+  function resetOrientation() {
+    setViewerTransform(identityViewerTransform);
+    setViewerResetKey((current) => current + 1);
+  }
+
+  function autoOrient() {
+    const box = sceneAnalysis?.boundingBox;
+    if (!box) {
+      resetOrientation();
+      return;
+    }
+    const spans = [
+      { axis: "x", span: Math.abs(box.robustMaxX - box.robustMinX) },
+      { axis: "y", span: Math.abs(box.robustMaxY - box.robustMinY) },
+      { axis: "z", span: Math.abs(box.robustMaxZ - box.robustMinZ) }
+    ].sort((a, b) => b.span - a.span);
+    const thinnest = spans[2]?.axis;
+    const next = { ...identityViewerTransform };
+    if (thinnest === "x") next.rotationZ = 90;
+    if (thinnest === "z") next.rotationX = 90;
+    setViewerTransform(next);
+    setViewerResetKey((current) => current + 1);
+  }
+
+  async function onSaveOrientation() {
+    if (!selectedAttempt?.attemptId) return;
+    setSavingViewerTransform(true);
+    try {
+      await saveAttemptViewerTransform(params.id, selectedAttempt.attemptId, viewerTransform, scanPreviewMode);
+      await refreshReconstruction();
+    } finally {
+      setSavingViewerTransform(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -452,8 +559,12 @@ export default function ViewerPage() {
               <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Sparse Scene Stats</p>
-                    <p className="mt-1 text-xs text-slate-400">The preview combines sparse COLMAP points with estimated room bounds.</p>
+                    <p className="text-sm font-semibold text-white">{activePreviewMode === "exterior" ? "Sparse Building Stats" : "Sparse Scene Stats"}</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {activePreviewMode === "exterior"
+                        ? "The preview shows COLMAP sparse points, camera poses, and an orientation-aware bounding box."
+                        : "The preview combines sparse COLMAP points with estimated room bounds."}
+                    </p>
                   </div>
                   <span className="rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
                     {sceneAnalysis?.confidence ?? "Low"} confidence
@@ -465,15 +576,15 @@ export default function ViewerPage() {
                     <p className="mt-1 text-sm font-semibold text-white">{sceneAnalysis?.pointCount ?? reconstruction?.sparsePointCount ?? 0}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500">Width</p>
+                    <p className="text-xs text-slate-500">{activePreviewMode === "exterior" ? "Bounds X" : "Width"}</p>
                     <p className="mt-1 text-sm font-semibold text-white">{room ? room.width.toFixed(2) : "-"} units</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500">Depth</p>
+                    <p className="text-xs text-slate-500">{activePreviewMode === "exterior" ? "Bounds Z" : "Depth"}</p>
                     <p className="mt-1 text-sm font-semibold text-white">{room ? room.depth.toFixed(2) : "-"} units</p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-500">Height</p>
+                    <p className="text-xs text-slate-500">{activePreviewMode === "exterior" ? "Bounds Y" : "Height"}</p>
                     <p className="mt-1 text-sm font-semibold text-white">{room ? room.height.toFixed(2) : "-"} units</p>
                   </div>
                   <div>
@@ -691,7 +802,7 @@ export default function ViewerPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-white">Point cloud readability</p>
-                  <p className="mt-1 text-xs text-slate-400">Adjust point rendering without changing reconstruction data.</p>
+                  <p className="mt-1 text-xs text-slate-400">Adjust point rendering and orientation without changing reconstruction data.</p>
                 </div>
                 <button
                   type="button"
@@ -700,6 +811,48 @@ export default function ViewerPage() {
                 >
                   Center point cloud
                 </button>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                {([
+                  ["auto", "Auto"],
+                  ["interior", "Interior / room scan"],
+                  ["exterior", "Exterior / building scan"]
+                ] as const).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setScanPreviewMode(mode)}
+                    className={`rounded-md border px-3 py-2 text-sm font-medium ${scanPreviewMode === mode ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Orientation</p>
+                    <p className="mt-1 text-xs text-slate-400">COLMAP scale and up direction are arbitrary. Save a correction per attempt.</p>
+                  </div>
+                  <button type="button" onClick={autoOrient} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-100 hover:bg-white/10">
+                    Auto orient point cloud
+                  </button>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => rotate("rotationX", 90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate X +90</button>
+                  <button type="button" onClick={() => rotate("rotationX", -90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate X -90</button>
+                  <button type="button" onClick={() => rotate("rotationY", 90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate Y +90</button>
+                  <button type="button" onClick={() => rotate("rotationY", -90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate Y -90</button>
+                  <button type="button" onClick={() => rotate("rotationZ", 90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate Z +90</button>
+                  <button type="button" onClick={() => rotate("rotationZ", -90)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Rotate Z -90</button>
+                  <button type="button" onClick={() => flip("flipX")} className={`rounded-md border px-3 py-2 text-sm ${viewerTransform.flipX ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-200 hover:bg-white/10"}`}>Flip X</button>
+                  <button type="button" onClick={() => flip("flipY")} className={`rounded-md border px-3 py-2 text-sm ${viewerTransform.flipY ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-200 hover:bg-white/10"}`}>Flip Y</button>
+                  <button type="button" onClick={() => flip("flipZ")} className={`rounded-md border px-3 py-2 text-sm ${viewerTransform.flipZ ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-200 hover:bg-white/10"}`}>Flip Z</button>
+                  <button type="button" onClick={resetOrientation} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Reset orientation</button>
+                  <button type="button" disabled={!selectedAttempt?.attemptId || savingViewerTransform} onClick={onSaveOrientation} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50">
+                    {savingViewerTransform ? "Saving..." : "Save orientation for this attempt"}
+                  </button>
+                </div>
               </div>
               <div className="mt-4 flex flex-wrap gap-3">
                 {hasDensePointCloud && hasSparsePointCloud && (
@@ -732,12 +885,25 @@ export default function ViewerPage() {
                     </button>
                   ))}
                 </div>
+                <label className="flex min-w-48 flex-col gap-1 rounded-md border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+                  Point size
+                  <input type="range" min="0.01" max="0.14" step="0.005" value={pointSizeValue} onChange={(event) => setPointSizeValue(Number(event.target.value))} />
+                </label>
+                <label className="flex min-w-48 flex-col gap-1 rounded-md border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+                  Point opacity
+                  <input type="range" min="0.15" max="1" step="0.05" value={pointOpacity} onChange={(event) => setPointOpacity(Number(event.target.value))} />
+                </label>
+                <select value={colorMode} onChange={(event) => setColorMode(event.target.value as PointCloudColorMode)} className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white">
+                  <option value="rgb">RGB from COLMAP</option>
+                  <option value="height">Height coloring</option>
+                  <option value="depth">Depth coloring</option>
+                  <option value="solid">Solid color</option>
+                </select>
                 {activePointCloud?.source === "colmap_sparse" && (
                   <>
                     {([
                       ["Sparse points", showSparsePoints, setShowSparsePoints],
-                      ["Room bounds", showRoomBounds, setShowRoomBounds],
-                      ["Estimated floor", showEstimatedFloor, setShowEstimatedFloor],
+                      ...(activePreviewMode === "interior" ? [["Room bounds", showRoomBounds, setShowRoomBounds], ["Estimated floor", showEstimatedFloor, setShowEstimatedFloor]] as const : []),
                       ["Camera path", showCameraPath, setShowCameraPath]
                     ] as const).map(([label, enabled, setter]) => (
                       <button
@@ -755,6 +921,13 @@ export default function ViewerPage() {
                 )}
                 <button
                   type="button"
+                  onClick={() => setShowBoundingBox((current) => !current)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium ${showBoundingBox ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"}`}
+                >
+                  {showBoundingBox ? "Hide bounding box" : "Show bounding box"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowReference((current) => !current)}
                   className={`rounded-md border px-3 py-2 text-sm font-medium ${
                     showReference ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"
@@ -769,11 +942,18 @@ export default function ViewerPage() {
             pointCloud={activePointCloud}
             sceneAnalysis={activeSceneAnalysis}
             pointSize={pointSize}
+            pointSizeValue={pointSizeValue}
+            pointOpacity={pointOpacity}
+            colorMode={colorMode}
             showSparsePoints={showSparsePoints}
-            showRoomBounds={showRoomBounds}
-            showEstimatedFloor={showEstimatedFloor}
+            showRoomBounds={activePreviewMode === "interior" && showRoomBounds}
+            showEstimatedFloor={activePreviewMode === "interior" && showEstimatedFloor}
             showCameraPath={showCameraPath}
+            showBoundingBox={showBoundingBox}
             showReference={showReference}
+            viewerTransform={viewerTransform}
+            previewMode={activePreviewMode}
+            outputLabel={outputType}
             resetKey={viewerResetKey}
           />
         </section>

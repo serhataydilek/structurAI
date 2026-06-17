@@ -121,6 +121,8 @@ def init_db() -> None:
                 log_files_json TEXT NOT NULL DEFAULT '[]',
                 sparse_model_folders_json TEXT NOT NULL DEFAULT '[]',
                 scene_analysis_summary_json TEXT NOT NULL DEFAULT '{}',
+                viewer_transform_json TEXT NOT NULL DEFAULT '{}',
+                viewer_preview_mode TEXT NOT NULL DEFAULT 'auto',
                 is_best_attempt INTEGER NOT NULL DEFAULT 0,
                 failure_reason TEXT,
                 updated_at TEXT NOT NULL,
@@ -161,6 +163,8 @@ def init_db() -> None:
         _ensure_column(conn, "reconstruction_attempts", "selected_frame_count", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "reconstruction_attempts", "frame_selection_mode", "TEXT NOT NULL DEFAULT 'All frames'")
         _ensure_column(conn, "reconstruction_attempts", "selected_frame_folder", "TEXT")
+        _ensure_column(conn, "reconstruction_attempts", "viewer_transform_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "reconstruction_attempts", "viewer_preview_mode", "TEXT NOT NULL DEFAULT 'auto'")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

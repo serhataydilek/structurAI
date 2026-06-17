@@ -94,6 +94,19 @@ export type ReadinessLabel = "Poor Capture" | "Usable Prototype Capture" | "Good
 export type ExtractionFpsMode = "Fast" | "Balanced" | "Detailed";
 export type ReconstructionMatchingMode = "Auto" | "Video Sequential" | "Photo Exhaustive";
 export type FrameSelectionMode = "Balanced subset" | "All frames" | "Sharpest subset" | "Evenly spaced subset";
+export type PreviewMode = "auto" | "interior" | "exterior";
+export type ViewerTransform = {
+  rotationX: number;
+  rotationY: number;
+  rotationZ: number;
+  flipX: boolean;
+  flipY: boolean;
+  flipZ: boolean;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  offsetZ: number;
+};
 
 export type FramePreview = {
   filename: string;
@@ -225,6 +238,8 @@ export type ReconstructionAttempt = {
   status: string;
   outputPath?: string | null;
   sceneAnalysisSummary?: Record<string, unknown>;
+  viewerTransform?: Partial<ViewerTransform>;
+  viewerPreviewMode?: PreviewMode;
   isBestAttempt: boolean;
   failureReason?: string | null;
   label?: string;

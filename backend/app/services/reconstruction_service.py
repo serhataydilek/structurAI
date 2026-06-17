@@ -1323,6 +1323,33 @@ def reconstruction_summary(project_id: str) -> dict[str, Any] | None:
     return _base_summary(project_id)
 
 
+def _normalized_viewer_transform(transform: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "rotationX": float(transform.get("rotationX") or 0),
+        "rotationY": float(transform.get("rotationY") or 0),
+        "rotationZ": float(transform.get("rotationZ") or 0),
+        "flipX": bool(transform.get("flipX")),
+        "flipY": bool(transform.get("flipY")),
+        "flipZ": bool(transform.get("flipZ")),
+        "scale": max(0.01, min(100.0, float(transform.get("scale") or 1))),
+        "offsetX": float(transform.get("offsetX") or 0),
+        "offsetY": float(transform.get("offsetY") or 0),
+        "offsetZ": float(transform.get("offsetZ") or 0),
+    }
+
+
+def save_attempt_viewer_transform(project_id: str, attempt_id: str, transform: dict[str, Any], preview_mode: str = "auto") -> dict[str, Any] | None:
+    attempt = reconstruction_repository.get_attempt(attempt_id)
+    if not attempt or attempt.get("projectId") != project_id:
+        return None
+    mode = preview_mode if preview_mode in {"auto", "interior", "exterior"} else "auto"
+    return reconstruction_repository.update_attempt_viewer_state(
+        attempt_id,
+        viewer_transform=_normalized_viewer_transform(transform),
+        viewer_preview_mode=mode,
+    )
+
+
 def _sweep_attempt_result(attempt: dict[str, Any] | None, error: str | None = None) -> dict[str, Any]:
     if not attempt:
         return {

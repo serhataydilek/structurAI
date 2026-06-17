@@ -5,11 +5,26 @@ from app.services import reconstruction_service
 from app.services.processing_service import readiness_label
 
 
-def _detected_output(summary: dict[str, Any] | None) -> str:
+def _preview_mode(project: dict[str, Any], capture: dict[str, Any] | None, summary: dict[str, Any] | None = None) -> str:
+    attempt_mode = (summary or {}).get("displayedAttempt", {}).get("viewerPreviewMode") or (summary or {}).get("bestAttempt", {}).get("viewerPreviewMode")
+    if attempt_mode == "exterior":
+        return "exterior"
+    if attempt_mode == "interior":
+        return "interior"
+    if project.get("scan_type") == "Building Scan":
+        return "exterior"
+    if capture and int(capture.get("image_count") or 0) >= 40 and int(capture.get("video_count") or 0) == 0:
+        return "exterior"
+    return "interior"
+
+
+def _detected_output(summary: dict[str, Any] | None, preview_mode: str = "interior") -> str:
     mode = summary["currentBestViewerMode"] if summary else "prototype_preview"
     if mode == "dense_point_cloud":
         return "Dense point cloud preview"
     if summary and summary.get("sparsePointCloudAvailable"):
+        if preview_mode == "exterior":
+            return "Sparse building point cloud preview"
         points = int(summary.get("sparsePointCount") or summary.get("pointCount") or 0)
         if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction" or points < 1500:
             return "Weak sparse reconstruction preview"
@@ -17,13 +32,19 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
     return "No reconstruction output"
 
 
-def _limitations(summary: dict[str, Any] | None) -> list[str]:
+def _limitations(summary: dict[str, Any] | None, preview_mode: str = "interior") -> list[str]:
     if summary and summary.get("currentBestViewerMode") == "dense_point_cloud":
         return [
             "Dense point cloud reconstruction is enabled. Mesh generation and GLB export are not yet implemented.",
             "Measurements are approximate in this prototype.",
         ]
     if summary and summary.get("sparsePointCloudAvailable"):
+        if preview_mode == "exterior":
+            return [
+                "COLMAP reconstruction has arbitrary scale and orientation unless aligned manually.",
+                "This is a sparse point cloud, not a dense mesh.",
+                "Measurements are approximate in this prototype.",
+            ]
         return [
             "Sparse reconstruction is enabled and has generated matched 3D feature points. The preview combines sparse COLMAP points with estimated room bounds.",
             "Room bounds and floor level are estimated from sparse features, not measured geometry or a generated mesh.",
@@ -64,13 +85,14 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
     scene_analysis = reconstruction_service.scene_analysis(project_id) if reconstruction_summary and reconstruction_summary.get("sparsePointCloudAvailable") else None
+    preview_mode = _preview_mode(project, capture, reconstruction_summary)
 
     return {
         "projectName": project["name"],
         "projectId": project_id,
         "uploadedMediaCount": len(media),
         "processingStatus": project["status"],
-        "detectedOutput": _detected_output(reconstruction_summary),
+        "detectedOutput": _detected_output(reconstruction_summary, preview_mode),
         "captureMetadata": {
             "uploadedMediaCount": capture["uploaded_media_count"] if capture else len(media),
             "extractedFrameCount": capture["extracted_frame_count"] if capture else 0,
@@ -130,6 +152,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "denseReconstructionLikelyAvailable": reconstruction_summary["denseReconstructionLikelyAvailable"] if reconstruction_summary else "unknown",
             "viewerModeRecommendation": reconstruction_summary["viewerModeRecommendation"] if reconstruction_summary else "prototype_preview",
             "currentBestViewerMode": reconstruction_summary["currentBestViewerMode"] if reconstruction_summary else "prototype_preview",
+            "previewMode": preview_mode,
             "sparseModelFolders": reconstruction_summary["sparseModelFolders"] if reconstruction_summary else [],
             "sceneAnalysis": scene_analysis,
             "denseLogPreviewSummary": reconstruction_summary["denseLogPreviewSummary"] if reconstruction_summary else {},
@@ -145,5 +168,5 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "nextStep": "Dense reconstruction / point cloud visualization",
         },
         "annotations": annotations,
-        "limitations": _limitations(reconstruction_summary),
+        "limitations": _limitations(reconstruction_summary, preview_mode),
     }

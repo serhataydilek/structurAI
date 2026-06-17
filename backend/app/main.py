@@ -53,6 +53,20 @@ class FrameSelectionPreviewOptions(BaseModel):
     mode: str = "Balanced subset"
 
 
+class ViewerTransformPayload(BaseModel):
+    rotationX: float = 0
+    rotationY: float = 0
+    rotationZ: float = 0
+    flipX: bool = False
+    flipY: bool = False
+    flipZ: bool = False
+    scale: float = 1
+    offsetX: float = 0
+    offsetY: float = 0
+    offsetZ: float = 0
+    previewMode: str = "auto"
+
+
 def _is_dev_mode() -> bool:
     return os.getenv("STRUCTURA_ENV", "development").lower() in {"local", "dev", "development", "test"}
 
@@ -287,6 +301,32 @@ def get_scene_analysis(project_id: str, attempt_id: str | None = None) -> dict:
     if analysis is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return analysis
+
+
+@app.post("/projects/{project_id}/attempts/{attempt_id}/viewer-transform")
+def save_attempt_viewer_transform(project_id: str, attempt_id: str, payload: ViewerTransformPayload) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    attempt = reconstruction_service.save_attempt_viewer_transform(
+        project_id,
+        attempt_id,
+        {
+            "rotationX": payload.rotationX,
+            "rotationY": payload.rotationY,
+            "rotationZ": payload.rotationZ,
+            "flipX": payload.flipX,
+            "flipY": payload.flipY,
+            "flipZ": payload.flipZ,
+            "scale": payload.scale,
+            "offsetX": payload.offsetX,
+            "offsetY": payload.offsetY,
+            "offsetZ": payload.offsetZ,
+        },
+        payload.previewMode,
+    )
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    return attempt
 
 
 @app.delete("/projects/{project_id}")

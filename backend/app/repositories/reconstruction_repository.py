@@ -166,6 +166,8 @@ def _decode_attempt(row: Any) -> dict[str, Any]:
     item["logFiles"] = json.loads(item.pop("log_files_json") or "[]")
     item["sparseModelFolders"] = json.loads(item.pop("sparse_model_folders_json") or "[]")
     item["sceneAnalysisSummary"] = json.loads(item.pop("scene_analysis_summary_json") or "{}")
+    item["viewerTransform"] = json.loads(item.pop("viewer_transform_json", "{}") or "{}")
+    item["viewerPreviewMode"] = item.pop("viewer_preview_mode", "auto") or "auto"
     item["isBestAttempt"] = bool(item.pop("is_best_attempt"))
     item["failureReason"] = item.pop("failure_reason")
     item.pop("updated_at", None)
@@ -205,7 +207,7 @@ def upsert_attempt(
                 source_frame_count, selected_frame_count, frame_selection_mode, selected_frame_folder,
                 registration_ratio, sparse_point_count, sparse_quality_label, matching_mode,
                 selected_fps, extraction_fps, status, output_path, log_files_json,
-                sparse_model_folders_json, scene_analysis_summary_json, is_best_attempt,
+                sparse_model_folders_json, scene_analysis_summary_json, viewer_transform_json, viewer_preview_mode, is_best_attempt,
                 failure_reason, updated_at
             )
             VALUES (
@@ -213,7 +215,7 @@ def upsert_attempt(
                 :source_frame_count, :selected_frame_count, :frame_selection_mode, :selected_frame_folder,
                 :registration_ratio, :sparse_point_count, :sparse_quality_label, :matching_mode,
                 :selected_fps, :extraction_fps, :status, :output_path, :log_files_json,
-                :sparse_model_folders_json, :scene_analysis_summary_json, :is_best_attempt,
+                :sparse_model_folders_json, :scene_analysis_summary_json, '{}', 'auto', :is_best_attempt,
                 :failure_reason, :updated_at
             )
             ON CONFLICT(attempt_id) DO UPDATE SET
@@ -342,3 +344,29 @@ def mark_best_attempt(project_id: str, attempt_id: str | None) -> None:
                 "UPDATE reconstruction_attempts SET is_best_attempt = 1 WHERE project_id = ? AND attempt_id = ?",
                 (project_id, attempt_id),
             )
+
+
+def update_attempt_viewer_state(
+    attempt_id: str,
+    *,
+    viewer_transform: dict[str, Any],
+    viewer_preview_mode: str = "auto",
+) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE reconstruction_attempts SET
+                viewer_transform_json = :viewer_transform_json,
+                viewer_preview_mode = :viewer_preview_mode,
+                updated_at = :updated_at
+            WHERE attempt_id = :attempt_id
+            """,
+            {
+                "attempt_id": attempt_id,
+                "viewer_transform_json": json.dumps(viewer_transform),
+                "viewer_preview_mode": viewer_preview_mode,
+                "updated_at": now,
+            },
+        )
+    return get_attempt(attempt_id)

@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, PreviewMode, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -150,4 +150,11 @@ export function addAnnotation(projectId: string, text: string) {
 
 export function getReport(projectId: string) {
   return request<Report>(`/projects/${projectId}/report`);
+}
+
+export function saveAttemptViewerTransform(projectId: string, attemptId: string, transform: ViewerTransform, previewMode: PreviewMode) {
+  return request(`/projects/${projectId}/attempts/${attemptId}/viewer-transform`, {
+    method: "POST",
+    body: JSON.stringify({ ...transform, previewMode })
+  });
 }
