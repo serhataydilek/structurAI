@@ -11,7 +11,7 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
         return "Dense point cloud preview"
     if summary and summary.get("sparsePointCloudAvailable"):
         return "Sparse scene preview"
-    return "Prototype digital twin preview"
+    return "No reconstruction output yet"
 
 
 def _limitations(summary: dict[str, Any] | None) -> list[str]:
@@ -35,8 +35,14 @@ def _limitations(summary: dict[str, Any] | None) -> list[str]:
 def _report_next_action(summary: dict[str, Any] | None) -> str:
     if not summary:
         return "Run sparse reconstruction"
+    if not summary.get("sparsePointCloudAvailable"):
+        return "Run sparse reconstruction"
+    if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction":
+        return "Improve capture and rerun sparse reconstruction"
     if summary.get("sparsePointCloudAvailable") and summary.get("denseReconstructionLikelyAvailable") is False:
         return "Install CUDA-enabled COLMAP for dense reconstruction or continue with visual preview pipeline"
+    if summary.get("denseReadiness", {}).get("ready"):
+        return "Run dense reconstruction"
     return summary.get("recommendedNextAction") or "Run sparse reconstruction"
 
 
@@ -91,6 +97,12 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "densePointCloudAvailable": reconstruction_summary["densePointCloudAvailable"] if reconstruction_summary else False,
             "pointCount": reconstruction_summary["pointCount"] if reconstruction_summary else 0,
             "sparsePointCount": reconstruction_summary["sparsePointCount"] if reconstruction_summary else 0,
+            "registeredImageCount": reconstruction_summary["registeredImageCount"] if reconstruction_summary else 0,
+            "registrationRatio": reconstruction_summary["registrationRatio"] if reconstruction_summary else 0,
+            "registrationRatioLabel": reconstruction_summary["registrationRatioLabel"] if reconstruction_summary else "No extracted frames",
+            "sparseQualityLabel": reconstruction_summary["sparseQualityLabel"] if reconstruction_summary else "Poor Sparse Reconstruction",
+            "sparseReconstructionQuality": reconstruction_summary["sparseReconstructionQuality"] if reconstruction_summary else "Poor Sparse Reconstruction",
+            "denseReadiness": reconstruction_summary["denseReadiness"] if reconstruction_summary else {"ready": False, "recommended": False, "reasons": ["sparse reconstruction is not complete"]},
             "densePointCount": reconstruction_summary["densePointCount"] if reconstruction_summary else 0,
             "colmapAvailable": reconstruction_summary["colmapAvailable"] if reconstruction_summary else False,
             "colmapPath": reconstruction_summary["colmapPath"] if reconstruction_summary else None,
@@ -108,6 +120,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "denseErrorMessage": reconstruction_summary["denseErrorMessage"] if reconstruction_summary else None,
             "likelyCauses": reconstruction_summary["likelyCauses"] if reconstruction_summary else [],
             "denseLikelyCauses": reconstruction_summary["denseLikelyCauses"] if reconstruction_summary else [],
+            "lowRegistrationRecommendations": reconstruction_summary["lowRegistrationRecommendations"] if reconstruction_summary else [],
             "recommendedFixes": reconstruction_summary["recommendedFixes"] if reconstruction_summary else [],
             "recommendedNextAction": _report_next_action(reconstruction_summary),
             "nextStep": "Dense reconstruction / point cloud visualization",

@@ -40,6 +40,16 @@ DENSE_FAILURE_CAUSES = [
     "COLMAP dense step failed",
     "CPU-only COLMAP may take a long time",
 ]
+LOW_REGISTRATION_RECOMMENDATIONS = [
+    "Move slower",
+    "Keep the same objects visible across frames",
+    "Capture in a loop",
+    "Add textured objects, posters, or books to plain rooms",
+    "Avoid blank walls, mirrors, glass, and shiny surfaces",
+    "Try Detailed 3 FPS",
+    "Try Video Sequential matching",
+    "Use better lighting",
+]
 CUDA_DENSE_FAILURE_MESSAGE = (
     "Dense stereo reconstruction likely requires a CUDA-enabled COLMAP build. "
     "Your current COLMAP installation appears to be without CUDA support. "
@@ -509,6 +519,50 @@ def _camera_path(paths: dict[str, Path]) -> dict[str, Any]:
     }
 
 
+def _registered_image_count(paths: dict[str, Path]) -> int:
+    return len(_camera_path(paths)["positions"])
+
+
+def _registration_ratio(registered_image_count: int, extracted_frame_count: int) -> float:
+    if extracted_frame_count <= 0:
+        return 0.0
+    return round(registered_image_count / extracted_frame_count, 3)
+
+
+def _sparse_quality_label(registered_image_count: int, registration_ratio: float, sparse_point_count: int) -> str:
+    if registered_image_count >= 30 and registration_ratio >= 0.30 and sparse_point_count >= 10000:
+        return "Strong Sparse Reconstruction"
+    if registered_image_count >= 10 and registration_ratio >= 0.15 and sparse_point_count >= 3000:
+        return "Usable Sparse Reconstruction"
+    return "Poor Sparse Reconstruction"
+
+
+def _dense_readiness(
+    sparse_status: str,
+    dense_likely_available: bool | str,
+    registered_image_count: int,
+    extracted_frame_count: int,
+    sparse_point_count: int,
+    sparse_quality_label: str,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    if sparse_status != "Sparse Reconstruction Complete":
+        reasons.append("sparse reconstruction is not complete")
+    if dense_likely_available is False:
+        reasons.append("current COLMAP build lacks CUDA")
+    if registered_image_count < 10:
+        reasons.append(f"only {registered_image_count}/{extracted_frame_count} frames were registered")
+    if sparse_quality_label == "Poor Sparse Reconstruction":
+        reasons.append("sparse point cloud is too weak")
+    if sparse_point_count < 3000:
+        reasons.append("capture needs more overlap / texture")
+    return {
+        "ready": len(reasons) == 0,
+        "recommended": len(reasons) == 0,
+        "reasons": reasons,
+    }
+
+
 def _scene_confidence(point_count: int, width: float, depth: float, height: float, camera_count: int) -> str:
     meaningful_dimensions = sum(1 for value in (width, depth, height) if value > 0.25)
     if point_count >= 4000 and meaningful_dimensions >= 3 and camera_count >= 10:
@@ -642,17 +696,21 @@ def _capture_fps_metadata(project_id: str) -> tuple[str, int]:
     return capture["selected_fps_mode"], int(capture["extraction_fps"])
 
 
-def _next_action(sparse_status: str, dense_status: str, dense_support_missing: bool = False) -> str:
+def _next_action(sparse_status: str, dense_status: str, dense_support_missing: bool = False, sparse_quality_label: str = "Poor Sparse Reconstruction") -> str:
     if dense_status == "Dense Reconstruction Complete":
         return "Generate mesh / GLB export"
     if dense_status == "Dense Reconstruction Failed":
         if dense_support_missing:
-            return "Install a CUDA-enabled COLMAP build or use a visual preview pipeline"
+            return "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
         return "Review dense logs and retry dense reconstruction"
     if sparse_status in {"Not Started", "Reconstructing Sparse Model"}:
         return "Run sparse reconstruction"
     if sparse_status == "Sparse Reconstruction Failed":
         return "Improve capture quality and rerun sparse reconstruction"
+    if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
+        return "Improve capture and rerun sparse reconstruction"
+    if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
+        return "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
     if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
         return "Run dense reconstruction"
     return "Run sparse reconstruction"
@@ -750,6 +808,18 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         dense_status = "Dense Reconstruction Not Started"
         sparse_status = "Not Started"
         viewer_mode = _viewer_mode(paths)
+        sparse_point_count = _point_count(paths)
+        registered_image_count = _registered_image_count(paths)
+        registration_ratio = _registration_ratio(registered_image_count, frame_count)
+        sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
+        dense_readiness = _dense_readiness(
+            sparse_status,
+            diag["denseReconstructionLikelyAvailable"],
+            registered_image_count,
+            frame_count,
+            sparse_point_count,
+            sparse_quality,
+        )
         return {
             "projectId": project_id,
             "status": sparse_status,
@@ -768,8 +838,16 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "sparseOutputExists": _sparse_output_exists(paths),
             "sparseModelFolders": _sparse_model_folders(paths),
             "sparsePointCloudAvailable": _point_cloud_available(paths),
-            "pointCount": _point_count(paths),
-            "sparsePointCount": _point_count(paths),
+            "pointCount": sparse_point_count,
+            "sparsePointCount": sparse_point_count,
+            "extractedFrameCount": frame_count,
+            "registeredImageCount": registered_image_count,
+            "registrationRatio": registration_ratio,
+            "registrationRatioLabel": f"{registered_image_count}/{frame_count} frames registered" if frame_count else "No extracted frames",
+            "sparseQualityLabel": sparse_quality,
+            "sparseReconstructionQuality": sparse_quality,
+            "denseReadiness": dense_readiness,
+            "denseRecommended": dense_readiness["recommended"],
             "densePointCloudAvailable": _dense_point_cloud_available(paths),
             "densePointCount": _dense_point_count(paths),
             "exportPathStatus": "available" if _point_file(paths).exists() else "missing",
@@ -791,11 +869,13 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "denseErrorMessage": None,
             "likelyCauses": [],
             "denseLikelyCauses": [],
+            "lowRegistrationRecommendations": LOW_REGISTRATION_RECOMMENDATIONS if sparse_quality == "Poor Sparse Reconstruction" and registered_image_count > 0 else [],
             "recommendedFixes": [],
             "recommendedNextAction": _next_action(
                 sparse_status,
                 dense_status,
                 _dense_support_likely_missing(diag, _dense_log_preview_summary(_dense_log_files(paths))),
+                sparse_quality,
             ),
             "nextStep": SPARSE_NEXT_STEP,
         }
@@ -813,6 +893,18 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         CUDA_DENSE_FAILURE_MESSAGE
         if dense_status == "Dense Reconstruction Failed" and dense_support_missing
         else metadata["dense_error_message"]
+    )
+    sparse_point_count = _point_count(paths)
+    registered_image_count = _registered_image_count(paths)
+    registration_ratio = _registration_ratio(registered_image_count, metadata["input_frame_count"])
+    sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
+    dense_readiness = _dense_readiness(
+        sparse_status,
+        diag["denseReconstructionLikelyAvailable"],
+        registered_image_count,
+        metadata["input_frame_count"],
+        sparse_point_count,
+        sparse_quality,
     )
     return {
         "projectId": project_id,
@@ -832,8 +924,16 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "sparseOutputExists": metadata["sparse_output_exists"],
         "sparseModelFolders": metadata["sparse_model_folders"],
         "sparsePointCloudAvailable": _point_cloud_available(paths),
-        "pointCount": _point_count(paths),
-        "sparsePointCount": _point_count(paths),
+        "pointCount": sparse_point_count,
+        "sparsePointCount": sparse_point_count,
+        "extractedFrameCount": metadata["input_frame_count"],
+        "registeredImageCount": registered_image_count,
+        "registrationRatio": registration_ratio,
+        "registrationRatioLabel": f"{registered_image_count}/{metadata['input_frame_count']} frames registered" if metadata["input_frame_count"] else "No extracted frames",
+        "sparseQualityLabel": sparse_quality,
+        "sparseReconstructionQuality": sparse_quality,
+        "denseReadiness": dense_readiness,
+        "denseRecommended": dense_readiness["recommended"],
         "densePointCloudAvailable": _dense_point_cloud_available(paths),
         "densePointCount": _dense_point_count(paths),
         "exportPathStatus": "available" if _point_file(paths).exists() else "missing",
@@ -855,8 +955,9 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "denseErrorMessage": dense_error_message,
         "likelyCauses": LIKELY_FAILURE_CAUSES if sparse_status == "Sparse Reconstruction Failed" else [],
         "denseLikelyCauses": _dense_likely_causes(diag, dense_previews) if dense_status == "Dense Reconstruction Failed" else [],
+        "lowRegistrationRecommendations": LOW_REGISTRATION_RECOMMENDATIONS if sparse_quality == "Poor Sparse Reconstruction" and registered_image_count > 0 else [],
         "recommendedFixes": RECOMMENDED_FIXES if sparse_status == "Sparse Reconstruction Failed" else [],
-        "recommendedNextAction": _next_action(sparse_status, dense_status, dense_support_missing),
+        "recommendedNextAction": _next_action(sparse_status, dense_status, dense_support_missing, sparse_quality),
         "nextStep": SPARSE_NEXT_STEP,
     }
 
