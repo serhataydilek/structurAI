@@ -23,6 +23,20 @@ const fpsOptions: { mode: ExtractionFpsMode; label: string; description: string 
   { mode: "Detailed", label: "Detailed 3 FPS", description: "More frames for COLMAP, longer processing." }
 ];
 
+const videoGuidance = [
+  "Record 60-90 seconds",
+  "Use Balanced 2 FPS extraction",
+  "Use Video Sequential matching",
+  "Use Balanced subset frame selection"
+];
+
+const photoGuidance = [
+  "Take 40-80 sharp photos",
+  "Keep 60-70% overlap",
+  "Use Photo Exhaustive matching",
+  "Use All frames or Balanced subset"
+];
+
 export default function UploadPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -130,6 +144,31 @@ export default function UploadPage() {
                     <span className="mt-1 block text-xs text-slate-500">{option.description}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-sm font-semibold text-white">Video scan mode</p>
+                <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                  {videoGuidance.map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-brand" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4">
+                <p className="text-sm font-semibold text-emerald-100">Photo set mode</p>
+                <ul className="mt-3 space-y-2 text-sm text-emerald-50/90">
+                  {photoGuidance.map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-200" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
 

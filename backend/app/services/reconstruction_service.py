@@ -43,14 +43,19 @@ DENSE_FAILURE_CAUSES = [
     "CPU-only COLMAP may take a long time",
 ]
 LOW_REGISTRATION_RECOMMENDATIONS = [
+    "Video capture is failing. Try a sharp photo set instead.",
+    "Take 40-80 sharp photos",
+    "Keep 60-70% overlap between photos",
     "Move slower",
     "Keep the same objects visible across frames",
+    "Keep the same objects visible across multiple photos",
     "Capture in a loop",
+    "Capture corners, doors, windows, furniture, and textured objects",
     "Add textured objects, posters, or books to plain rooms",
     "Avoid blank walls, mirrors, glass, and shiny surfaces",
     "Try Balanced 2 FPS if Detailed 3 FPS creates too many weak frames",
     "Try Video Sequential matching for video",
-    "Try Photo Exhaustive matching for selected image sets",
+    "Use Photo Exhaustive matching for photo sets",
     "Use better lighting",
 ]
 CUDA_DENSE_FAILURE_MESSAGE = (
@@ -1012,7 +1017,7 @@ def _next_action(sparse_status: str, dense_status: str, dense_support_missing: b
     if sparse_status == "Sparse Reconstruction Failed":
         return "Improve capture quality and rerun sparse reconstruction"
     if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
-        return "Improve capture or reconstruction settings and rerun sparse reconstruction"
+        return "Try a better capture"
     if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
         return "Continue sparse scene preview or install CUDA-enabled COLMAP"
     if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:

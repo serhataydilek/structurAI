@@ -15,6 +15,18 @@ export default function ReportPage() {
   const bestAttempt = report?.reconstructionMetadata?.bestAttempt;
   const latestAttempt = report?.reconstructionMetadata?.latestAttempt;
   const latestDiffersFromBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
+  const sparseQualityPoor = report?.reconstructionMetadata?.sparseQualityLabel === "Poor Sparse Reconstruction";
+  const selectedFrameCount = report?.reconstructionMetadata?.selectedFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0;
+  const registeredImageCount = report?.reconstructionMetadata?.registeredImageCount ?? 0;
+  const selectedRegistrationPercent = Math.round((report?.reconstructionMetadata?.selectedRegistrationRatio ?? report?.reconstructionMetadata?.registrationRatio ?? 0) * 100);
+  const photoSetRecommendations = [
+    "Take 40-80 sharp photos.",
+    "Keep 60-70% overlap between photos.",
+    "Keep the same objects visible across multiple photos.",
+    "Capture corners, doors, windows, furniture, and textured objects.",
+    "Avoid blank walls, mirrors, glass, and shiny surfaces.",
+    "Use Photo Exhaustive matching for photo sets."
+  ];
 
   useEffect(() => {
     getReport(params.id).then(setReport).catch(() => setReport(null));
@@ -160,6 +172,43 @@ export default function ReportPage() {
               <p className="text-xs text-slate-500">Matching mode used</p>
               <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.matchingModeUsed ?? "Not Started"}</p>
             </div>
+            {sparseQualityPoor && (
+              <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 p-5 text-red-50">
+                <p className="text-base font-semibold">
+                  COLMAP could only register {registeredImageCount} out of {selectedFrameCount} selected frames. The reconstruction is too weak to produce a readable scene.
+                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-red-100/70">Selected frames</p>
+                    <p className="text-lg font-semibold">{selectedFrameCount}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-red-100/70">Registered images</p>
+                    <p className="text-lg font-semibold">{registeredImageCount}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-red-100/70">Selected registration ratio</p>
+                    <p className="text-lg font-semibold">{selectedRegistrationPercent}%</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-red-100/70">Sparse points</p>
+                    <p className="text-lg font-semibold">{report?.reconstructionMetadata?.sparsePointCount ?? 0}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-red-100/85">Likely reason: Most frames could not be reliably matched.</p>
+                <p className="mt-3 text-sm font-semibold text-red-50">Next action: Improve capture and rerun sparse reconstruction.</p>
+              </div>
+            )}
+            {sparseQualityPoor && (
+              <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-5">
+                <p className="text-base font-semibold text-emerald-100">Video capture is failing. Try a sharp photo set instead.</p>
+                <ul className="mt-3 grid gap-2 text-sm text-emerald-50/90 md:grid-cols-2">
+                  {photoSetRecommendations.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {report?.detectedOutput === "Sparse scene preview" && (
               <div className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-4 text-sm text-cyan-50">
                 The preview combines sparse COLMAP points with estimated room bounds. It is a readability layer before dense reconstruction or mesh generation, not a final digital twin.

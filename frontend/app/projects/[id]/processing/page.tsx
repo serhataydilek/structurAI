@@ -116,9 +116,23 @@ export default function ProcessingPage() {
   const attempts = reconstruction?.reconstructionAttempts ?? [];
   const bestAttempt = reconstruction?.bestAttempt;
   const latestAttempt = reconstruction?.latestAttempt;
+  const latestWorseThanBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
+  const selectedFrameCount = reconstruction?.selectedFrameCount ?? reconstruction?.extractedFrameCount ?? reconstruction?.inputFrameCount ?? 0;
+  const registeredImageCount = reconstruction?.registeredImageCount ?? 0;
+  const selectedRegistrationPercent = Math.round((reconstruction?.selectedRegistrationRatio ?? reconstruction?.registrationRatio ?? 0) * 100);
   const selectedFrames = frames.length > 0
     ? [frames[0], frames[Math.floor(frames.length / 2)], frames[frames.length - 1]].filter((frame, index, all) => frame && all.findIndex((item) => item.filename === frame.filename) === index)
     : [];
+  const photoSetRecommendations = [
+    "Take 40-80 sharp photos.",
+    "Keep 60-70% overlap between photos.",
+    "Keep the same objects visible across multiple photos.",
+    "Capture corners, doors, windows, furniture, and textured objects.",
+    "Avoid blank walls, mirrors, glass, and shiny surfaces.",
+    "Use Photo Exhaustive matching for photo sets."
+  ];
+  const videoModeRecommendations = ["60-90 seconds", "Balanced 2 FPS", "Video Sequential matching", "Balanced subset"];
+  const photoModeRecommendations = ["40-80 images", "Photo Exhaustive matching", "All frames or Balanced subset"];
 
   async function onRunSparseReconstruction() {
     setReconstructing(true);
@@ -296,6 +310,28 @@ export default function ProcessingPage() {
         </section>
 
         <section className="glass-panel mt-6 rounded-lg p-6">
+          <h2 className="text-lg font-semibold text-white">Capture Mode Guidance</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Video scan mode</p>
+              <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                {videoModeRecommendations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4">
+              <p className="text-sm font-semibold text-emerald-100">Photo set mode</p>
+              <ul className="mt-3 space-y-2 text-sm text-emerald-50/90">
+                {photoModeRecommendations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section className="glass-panel mt-6 rounded-lg p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -430,6 +466,57 @@ export default function ProcessingPage() {
             </div>
           )}
 
+          {sparseQualityPoor && (
+            <div className="mt-5 rounded-lg border border-red-400/30 bg-red-400/10 p-5 text-red-50">
+              <p className="text-base font-semibold">
+                COLMAP could only register {registeredImageCount} out of {selectedFrameCount} selected frames. The reconstruction is too weak to produce a readable scene.
+              </p>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div>
+                  <p className="text-xs text-red-100/70">Selected frames</p>
+                  <p className="text-lg font-semibold">{selectedFrameCount}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-red-100/70">Registered images</p>
+                  <p className="text-lg font-semibold">{registeredImageCount}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-red-100/70">Selected registration ratio</p>
+                  <p className="text-lg font-semibold">{selectedRegistrationPercent}%</p>
+                </div>
+                <div>
+                  <p className="text-xs text-red-100/70">Sparse points</p>
+                  <p className="text-lg font-semibold">{reconstruction?.sparsePointCount ?? 0}</p>
+                </div>
+              </div>
+              <p className="mt-3 text-sm text-red-100/85">Likely reason: Most frames could not be reliably matched.</p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link href={`/projects/${params.id}/upload`} className="rounded-md bg-red-100 px-4 py-2.5 text-sm font-semibold text-red-950 hover:bg-white">
+                  Try a better capture
+                </Link>
+                <button
+                  type="button"
+                  disabled={!hasFrames || !colmapAvailable || reconstructing || sweeping}
+                  onClick={onRunSparseSweep}
+                  className="rounded-md border border-red-100/30 px-4 py-2.5 text-sm font-semibold text-red-50 hover:bg-red-100/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {sweeping ? "Running Sparse Experiment Sweep..." : "Run another sparse sweep"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {sparseQualityPoor && (
+            <div className="mt-5 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-5">
+              <p className="text-base font-semibold text-emerald-100">Video capture is failing. Try a sharp photo set instead.</p>
+              <ul className="mt-3 grid gap-2 text-sm text-emerald-50/90 md:grid-cols-2">
+                {photoSetRecommendations.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {!colmapAvailable && (
             <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
               COLMAP is not detected. Install COLMAP and verify with <span className="font-semibold">colmap -h</span> or <span className="font-semibold">COLMAP.bat -h</span>, then restart the backend.
@@ -483,12 +570,21 @@ export default function ProcessingPage() {
                   <p className="mt-1 text-sm font-semibold text-white">{latestAttempt?.label ?? "Unavailable"}</p>
                 </div>
               </div>
+              {latestWorseThanBest && (
+                <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+                  Latest attempt is worse than the best saved attempt. Viewer is showing the best attempt by default.
+                </div>
+              )}
               <div className="mt-3 space-y-2">
                 {attempts.map((attempt) => (
                   <div key={attempt.attemptId} className={`rounded-md border p-3 text-sm ${attempt.isBestAttempt ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-300"}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span>{attempt.label}</span>
-                      <span className="text-xs">{attempt.isBestAttempt ? "Best attempt" : attempt.status}</span>
+                      <div className="flex flex-wrap gap-2">
+                        {attempt.isBestAttempt && <span className="rounded border border-emerald-300/30 px-2 py-0.5 text-xs text-emerald-100">Best attempt</span>}
+                        {latestAttempt?.attemptId === attempt.attemptId && <span className="rounded border border-slate-400/30 px-2 py-0.5 text-xs text-slate-200">Latest attempt</span>}
+                        <span className="rounded border border-white/10 px-2 py-0.5 text-xs">{attempt.sparseQualityLabel?.replace(" Sparse Reconstruction", "")}</span>
+                      </div>
                     </div>
                     <p className="mt-1 text-xs text-slate-400">
                       {attempt.frameSelectionMode ?? "All frames"} | {attempt.selectedFrameCount ?? attempt.extractedFrameCount} selected from {attempt.sourceFrameCount ?? attempt.extractedFrameCount} source frames | {attempt.registeredImageCount} registered | {attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`} | {attempt.sparsePointCount} points | {attempt.sparseQualityLabel}
@@ -628,14 +724,23 @@ export default function ProcessingPage() {
           )}
           {sparseQualityPoor && (
             <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-              Dense reconstruction is not recommended because the sparse reconstruction is too weak.
+              {denseLikelyUnavailable
+                ? "Dense reconstruction is not available with the current CUDA-less COLMAP build and is not recommended for this weak sparse attempt."
+                : "Dense reconstruction is not recommended for this weak sparse attempt."}
             </div>
           )}
           {(denseLikelyUnavailable || sparseQualityPoor) && (
             <details className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced dense reconstruction action</summary>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced / experimental dense reconstruction</summary>
+              <p className="mt-3 text-sm text-slate-400">
+                {denseLikelyUnavailable && sparseQualityPoor
+                  ? "Dense reconstruction is not available with the current CUDA-less COLMAP build and is not recommended for this weak sparse attempt."
+                  : denseLikelyUnavailable
+                    ? "Dense reconstruction is not available with the current CUDA-less COLMAP build."
+                    : "Dense reconstruction is not recommended for this weak sparse attempt."}
+              </p>
               <button
-                disabled={!canRunDense || denseReconstructing}
+                disabled={!canRunDense || denseReconstructing || sparseQualityPoor}
                 onClick={onRunDenseReconstruction}
                 className="mt-3 rounded-md border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -700,7 +805,10 @@ export default function ProcessingPage() {
               {selectedFrames.map((frame, index) => (
                 <button key={`${frame.filename}-${index}`} type="button" onClick={() => setLargeFrame(frame)} className="overflow-hidden rounded-md border border-white/10 bg-slate-950 text-left">
                   <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-36 w-full object-cover" />
-                  <p className="px-2 py-2 text-xs text-slate-300">{index === 0 ? "First frame" : index === 1 ? "Middle frame" : "Last frame"}</p>
+                  <div className="px-2 py-2">
+                    <p className="text-xs font-semibold text-slate-300">{index === 0 ? "First frame" : index === 1 ? "Middle frame" : "Last frame"}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{frame.filename}</p>
+                  </div>
                 </button>
               ))}
             </div>

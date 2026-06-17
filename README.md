@@ -203,6 +203,13 @@ Sparse experiment sweep:
 - Structura keeps all attempts and continues using the best-scoring sparse attempt by default.
 - Registration ratio is reported against selected frames first, for example `44/120 selected frames registered`; source-frame count is shown separately because the reconstruction did not use every extracted frame.
 
+Capture mode guidance:
+
+- For video scan mode, record 60-90 seconds, use Balanced 2 FPS, use Video Sequential matching, and use Balanced subset frame selection.
+- For photo set mode, take 40-80 sharp images, keep 60-70% overlap, use Photo Exhaustive matching, and use All frames or Balanced subset frame selection.
+- If video sparse reconstruction is poor, switch to a sharp photo set. Keep the same objects visible across multiple photos, capture corners, doors, windows, furniture, and textured objects, and avoid blank walls, mirrors, glass, and shiny surfaces.
+- When sparse quality is `Poor Sparse Reconstruction`, Structura now treats dense reconstruction as secondary or experimental. The primary next action is better capture, with another sparse sweep as the secondary option.
+
 How to improve sparse reconstruction quality:
 
 - Use Detailed 3 FPS for video captures with fast camera motion or thin point clouds.

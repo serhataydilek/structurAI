@@ -10,7 +10,10 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
     if mode == "dense_point_cloud":
         return "Dense point cloud preview"
     if summary and summary.get("sparsePointCloudAvailable"):
-        return "Sparse point cloud preview"
+        points = int(summary.get("sparsePointCount") or summary.get("pointCount") or 0)
+        if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction" or points < 1500:
+            return "Weak sparse reconstruction preview"
+        return "Sparse scene preview"
     return "Prototype digital twin preview"
 
 
