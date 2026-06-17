@@ -99,6 +99,29 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS reconstruction_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                extracted_frame_count INTEGER NOT NULL,
+                registered_image_count INTEGER NOT NULL DEFAULT 0,
+                registration_ratio REAL NOT NULL DEFAULT 0,
+                sparse_point_count INTEGER NOT NULL DEFAULT 0,
+                sparse_quality_label TEXT NOT NULL DEFAULT 'Poor Sparse Reconstruction',
+                matching_mode TEXT NOT NULL DEFAULT 'Photo Exhaustive',
+                selected_fps TEXT NOT NULL DEFAULT 'Balanced',
+                extraction_fps INTEGER NOT NULL DEFAULT 2,
+                status TEXT NOT NULL,
+                output_path TEXT,
+                log_files_json TEXT NOT NULL DEFAULT '[]',
+                sparse_model_folders_json TEXT NOT NULL DEFAULT '[]',
+                scene_analysis_summary_json TEXT NOT NULL DEFAULT '{}',
+                is_best_attempt INTEGER NOT NULL DEFAULT 0,
+                failure_reason TEXT,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")

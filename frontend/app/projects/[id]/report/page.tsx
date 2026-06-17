@@ -12,6 +12,9 @@ export default function ReportPage() {
   const params = useParams<{ id: string }>();
   const [report, setReport] = useState<Report | null>(null);
   const denseLogEntries = Object.entries(report?.reconstructionMetadata?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
+  const bestAttempt = report?.reconstructionMetadata?.bestAttempt;
+  const latestAttempt = report?.reconstructionMetadata?.latestAttempt;
+  const latestDiffersFromBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
 
   useEffect(() => {
     getReport(params.id).then(setReport).catch(() => setReport(null));
@@ -165,6 +168,17 @@ export default function ReportPage() {
                     <li key={reason}>{reason}</li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {bestAttempt && (
+              <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs font-semibold text-slate-300">Best sparse attempt</p>
+                <p className="mt-2 text-sm font-semibold text-white">{bestAttempt.label}</p>
+                {latestDiffersFromBest && latestAttempt && (
+                  <p className="mt-2 text-sm text-amber-100">
+                    Latest run is worse than the best stored attempt: {latestAttempt.label}. The report uses the best attempt by default.
+                  </p>
+                )}
               </div>
             )}
             {(report?.reconstructionMetadata?.lowRegistrationRecommendations ?? []).length > 0 && (

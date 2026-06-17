@@ -143,3 +143,135 @@ def update_dense_metadata(
             },
         )
     return get_reconstruction_metadata(project_id) or {}
+
+
+def _decode_attempt(row: Any) -> dict[str, Any]:
+    item = dict(row)
+    item["attemptId"] = item.pop("attempt_id")
+    item["projectId"] = item.pop("project_id")
+    item["createdAt"] = item.pop("created_at")
+    item["extractedFrameCount"] = item.pop("extracted_frame_count")
+    item["registeredImageCount"] = item.pop("registered_image_count")
+    item["registrationRatio"] = item.pop("registration_ratio")
+    item["sparsePointCount"] = item.pop("sparse_point_count")
+    item["sparseQualityLabel"] = item.pop("sparse_quality_label")
+    item["matchingMode"] = item.pop("matching_mode")
+    item["selectedFps"] = item.pop("selected_fps")
+    item["extractionFps"] = item.pop("extraction_fps")
+    item["outputPath"] = item.pop("output_path")
+    item["logFiles"] = json.loads(item.pop("log_files_json") or "[]")
+    item["sparseModelFolders"] = json.loads(item.pop("sparse_model_folders_json") or "[]")
+    item["sceneAnalysisSummary"] = json.loads(item.pop("scene_analysis_summary_json") or "{}")
+    item["isBestAttempt"] = bool(item.pop("is_best_attempt"))
+    item["failureReason"] = item.pop("failure_reason")
+    item.pop("updated_at", None)
+    return item
+
+
+def upsert_attempt(
+    *,
+    attempt_id: str,
+    project_id: str,
+    extracted_frame_count: int,
+    registered_image_count: int,
+    registration_ratio: float,
+    sparse_point_count: int,
+    sparse_quality_label: str,
+    matching_mode: str,
+    selected_fps: str,
+    extraction_fps: int,
+    status: str,
+    output_path: str | None,
+    log_files: list[str],
+    sparse_model_folders: list[str],
+    scene_analysis_summary: dict[str, Any],
+    is_best_attempt: bool = False,
+    failure_reason: str | None = None,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO reconstruction_attempts (
+                attempt_id, project_id, created_at, extracted_frame_count, registered_image_count,
+                registration_ratio, sparse_point_count, sparse_quality_label, matching_mode,
+                selected_fps, extraction_fps, status, output_path, log_files_json,
+                sparse_model_folders_json, scene_analysis_summary_json, is_best_attempt,
+                failure_reason, updated_at
+            )
+            VALUES (
+                :attempt_id, :project_id, :created_at, :extracted_frame_count, :registered_image_count,
+                :registration_ratio, :sparse_point_count, :sparse_quality_label, :matching_mode,
+                :selected_fps, :extraction_fps, :status, :output_path, :log_files_json,
+                :sparse_model_folders_json, :scene_analysis_summary_json, :is_best_attempt,
+                :failure_reason, :updated_at
+            )
+            ON CONFLICT(attempt_id) DO UPDATE SET
+                extracted_frame_count = excluded.extracted_frame_count,
+                registered_image_count = excluded.registered_image_count,
+                registration_ratio = excluded.registration_ratio,
+                sparse_point_count = excluded.sparse_point_count,
+                sparse_quality_label = excluded.sparse_quality_label,
+                matching_mode = excluded.matching_mode,
+                selected_fps = excluded.selected_fps,
+                extraction_fps = excluded.extraction_fps,
+                status = excluded.status,
+                output_path = excluded.output_path,
+                log_files_json = excluded.log_files_json,
+                sparse_model_folders_json = excluded.sparse_model_folders_json,
+                scene_analysis_summary_json = excluded.scene_analysis_summary_json,
+                is_best_attempt = excluded.is_best_attempt,
+                failure_reason = excluded.failure_reason,
+                updated_at = excluded.updated_at
+            """,
+            {
+                "attempt_id": attempt_id,
+                "project_id": project_id,
+                "created_at": now,
+                "extracted_frame_count": extracted_frame_count,
+                "registered_image_count": registered_image_count,
+                "registration_ratio": registration_ratio,
+                "sparse_point_count": sparse_point_count,
+                "sparse_quality_label": sparse_quality_label,
+                "matching_mode": matching_mode,
+                "selected_fps": selected_fps,
+                "extraction_fps": extraction_fps,
+                "status": status,
+                "output_path": output_path,
+                "log_files_json": json.dumps(log_files),
+                "sparse_model_folders_json": json.dumps(sparse_model_folders),
+                "scene_analysis_summary_json": json.dumps(scene_analysis_summary),
+                "is_best_attempt": 1 if is_best_attempt else 0,
+                "failure_reason": failure_reason,
+                "updated_at": now,
+            },
+        )
+    return get_attempt(attempt_id) or {}
+
+
+def get_attempt(attempt_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM reconstruction_attempts WHERE attempt_id = ?",
+            (attempt_id,),
+        ).fetchone()
+    return _decode_attempt(row) if row else None
+
+
+def list_attempts(project_id: str) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reconstruction_attempts WHERE project_id = ? ORDER BY created_at DESC",
+            (project_id,),
+        ).fetchall()
+    return [_decode_attempt(row) for row in rows]
+
+
+def mark_best_attempt(project_id: str, attempt_id: str | None) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE reconstruction_attempts SET is_best_attempt = 0 WHERE project_id = ?", (project_id,))
+        if attempt_id:
+            conn.execute(
+                "UPDATE reconstruction_attempts SET is_best_attempt = 1 WHERE project_id = ? AND attempt_id = ?",
+                (project_id, attempt_id),
+            )

@@ -4,6 +4,7 @@ import math
 import shutil
 import subprocess
 from typing import Any
+from uuid import uuid4
 
 from app.database import PROCESSED_DIR
 from app.repositories import capture_repository, reconstruction_repository, project_repository
@@ -46,8 +47,9 @@ LOW_REGISTRATION_RECOMMENDATIONS = [
     "Capture in a loop",
     "Add textured objects, posters, or books to plain rooms",
     "Avoid blank walls, mirrors, glass, and shiny surfaces",
-    "Try Detailed 3 FPS",
-    "Try Video Sequential matching",
+    "Try Balanced 2 FPS if Detailed 3 FPS creates too many weak frames",
+    "Try Video Sequential matching for video",
+    "Try Photo Exhaustive matching for selected image sets",
     "Use better lighting",
 ]
 CUDA_DENSE_FAILURE_MESSAGE = (
@@ -129,6 +131,30 @@ def _workspace(project_id: str) -> dict[str, Path]:
         if key != "database":
             path.mkdir(parents=True, exist_ok=True)
     return paths
+
+
+def _attempt_workspace(project_id: str, attempt_id: str) -> dict[str, Path]:
+    root = PROCESSED_DIR / project_id / "reconstruction" / "colmap" / "attempts" / attempt_id
+    paths = {
+        "root": root,
+        "database": root / "database.db",
+        "sparse": root / "sparse",
+        "dense": root / "dense",
+        "dense_workspace": root / "dense" / "workspace",
+        "dense_logs": root / "dense" / "logs",
+        "exports": root / "exports",
+        "logs": root / "logs",
+    }
+    for key, path in paths.items():
+        if key != "database":
+            path.mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def _attempt_paths_from_record(attempt: dict[str, Any] | None, project_id: str) -> dict[str, Path]:
+    if attempt and attempt.get("attemptId") and attempt["attemptId"] != "legacy":
+        return _attempt_workspace(project_id, attempt["attemptId"])
+    return _workspace(project_id)
 
 
 def _frames_dir(project_id: str) -> Path:
@@ -537,6 +563,108 @@ def _sparse_quality_label(registered_image_count: int, registration_ratio: float
     return "Poor Sparse Reconstruction"
 
 
+def _attempt_score(attempt: dict[str, Any]) -> tuple[int, int, int, int]:
+    quality_rank = {
+        "Strong Sparse Reconstruction": 3,
+        "Usable Sparse Reconstruction": 2,
+        "Poor Sparse Reconstruction": 1,
+    }.get(attempt.get("sparseQualityLabel"), 0)
+    return (
+        quality_rank,
+        int(attempt.get("registeredImageCount") or 0),
+        int(attempt.get("sparsePointCount") or 0),
+        int(round(float(attempt.get("registrationRatio") or 0) * 1000)),
+    )
+
+
+def _attempt_label(attempt: dict[str, Any]) -> str:
+    quality = str(attempt.get("sparseQualityLabel") or "Unknown").replace(" Sparse Reconstruction", "")
+    registered = int(attempt.get("registeredImageCount") or 0)
+    extracted = int(attempt.get("extractedFrameCount") or 0)
+    points = int(attempt.get("sparsePointCount") or 0)
+    return f"{quality} - {registered}/{extracted} registered - {points} points"
+
+
+def _scene_analysis_summary(analysis: dict[str, Any] | None) -> dict[str, Any]:
+    if not analysis:
+        return {}
+    return {
+        "available": analysis.get("available", False),
+        "pointCount": analysis.get("pointCount", 0),
+        "confidence": analysis.get("confidence", "Low"),
+        "message": analysis.get("message", ""),
+    }
+
+
+def _legacy_attempt(project_id: str, metadata: dict[str, Any] | None, paths: dict[str, Path], frame_count: int) -> dict[str, Any] | None:
+    sparse_point_count = _point_count(paths)
+    sparse_available = _point_cloud_available(paths)
+    if not metadata and not sparse_available:
+        return None
+    registered = _registered_image_count(paths)
+    extracted = int(metadata["input_frame_count"]) if metadata else frame_count
+    ratio = _registration_ratio(registered, extracted)
+    quality = _sparse_quality_label(registered, ratio, sparse_point_count)
+    status = metadata["status"] if metadata else ("Sparse Reconstruction Complete" if sparse_available else "Not Started")
+    return {
+        "attemptId": "legacy",
+        "projectId": project_id,
+        "createdAt": metadata.get("completed_at") or metadata.get("started_at") or metadata.get("updated_at") if metadata else "",
+        "extractedFrameCount": extracted,
+        "registeredImageCount": registered,
+        "registrationRatio": ratio,
+        "registrationRatioLabel": f"{registered}/{extracted} frames registered" if extracted else "No extracted frames",
+        "sparsePointCount": sparse_point_count,
+        "sparseQualityLabel": quality,
+        "matchingMode": _matching_mode_display(metadata, status) if metadata else "Unknown / legacy sparse run",
+        "selectedFps": metadata.get("selected_fps_mode") if metadata else "Balanced",
+        "extractionFps": metadata.get("extraction_fps") if metadata else 2,
+        "status": status,
+        "outputPath": str(paths["root"]),
+        "logFiles": metadata.get("log_files", []) if metadata else [],
+        "sparseModelFolders": _sparse_model_folders(paths),
+        "sceneAnalysisSummary": {},
+        "isBestAttempt": False,
+        "failureReason": metadata.get("error_message") if metadata else None,
+        "label": "",
+        "source": "legacy",
+    }
+
+
+def _attempts_for_project(project_id: str, metadata: dict[str, Any] | None, paths: dict[str, Path], frame_count: int) -> list[dict[str, Any]]:
+    attempts = reconstruction_repository.list_attempts(project_id)
+    legacy = _legacy_attempt(project_id, metadata, paths, frame_count)
+    if legacy:
+        attempts.append(legacy)
+    best_id = _best_attempt(attempts)["attemptId"] if attempts else None
+    normalized = []
+    for attempt in attempts:
+        item = dict(attempt)
+        item["registrationRatioLabel"] = f"{item['registeredImageCount']}/{item['extractedFrameCount']} frames registered" if item["extractedFrameCount"] else "No extracted frames"
+        item["isBestAttempt"] = item["attemptId"] == best_id
+        item["label"] = _attempt_label(item)
+        normalized.append(item)
+    return sorted(normalized, key=lambda item: item.get("createdAt") or "", reverse=True)
+
+
+def _best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    successful = [attempt for attempt in attempts if attempt.get("status") == "Sparse Reconstruction Complete" and int(attempt.get("sparsePointCount") or 0) > 0]
+    candidates = successful or attempts
+    return max(candidates, key=_attempt_score)
+
+
+def _latest_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return attempts[0] if attempts else None
+
+
+def _update_best_attempt_marker(project_id: str) -> None:
+    attempts = reconstruction_repository.list_attempts(project_id)
+    if not attempts:
+        return
+    best = _best_attempt(attempts)
+    reconstruction_repository.mark_best_attempt(project_id, best["attemptId"])
+
+
 def _dense_readiness(
     sparse_status: str,
     dense_likely_available: bool | str,
@@ -572,11 +700,15 @@ def _scene_confidence(point_count: int, width: float, depth: float, height: floa
     return "Low"
 
 
-def scene_analysis(project_id: str) -> dict[str, Any] | None:
+def scene_analysis(project_id: str, attempt_id: str | None = None) -> dict[str, Any] | None:
     if not project_repository.get_project(project_id):
         return None
 
-    paths = _workspace(project_id)
+    legacy_paths = _workspace(project_id)
+    metadata = reconstruction_repository.get_reconstruction_metadata(project_id)
+    attempts = _attempts_for_project(project_id, metadata, legacy_paths, len(_frames(project_id)))
+    selected_attempt = next((attempt for attempt in attempts if attempt["attemptId"] == attempt_id), None) if attempt_id else (_best_attempt(attempts) if attempts else None)
+    paths = _attempt_paths_from_record(selected_attempt, project_id)
     points = _parse_sparse_points(_point_file(paths))
     diag = diagnostics()
     dense_support_missing = diag["denseReconstructionLikelyAvailable"] is False
@@ -701,18 +833,18 @@ def _next_action(sparse_status: str, dense_status: str, dense_support_missing: b
         return "Generate mesh / GLB export"
     if dense_status == "Dense Reconstruction Failed":
         if dense_support_missing:
-            return "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
+            return "Continue sparse scene preview or install CUDA-enabled COLMAP"
         return "Review dense logs and retry dense reconstruction"
     if sparse_status in {"Not Started", "Reconstructing Sparse Model"}:
         return "Run sparse reconstruction"
     if sparse_status == "Sparse Reconstruction Failed":
         return "Improve capture quality and rerun sparse reconstruction"
+    if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
+        return "Improve capture or reconstruction settings and rerun sparse reconstruction"
+    if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
+        return "Continue sparse scene preview or install CUDA-enabled COLMAP"
     if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
         return "Run dense reconstruction"
-    if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
-        return "Improve capture and rerun sparse reconstruction"
-    if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
-        return "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
     return "Run sparse reconstruction"
 
 
@@ -803,8 +935,13 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
     diag = diagnostics()
 
     capture_fps_mode, extraction_fps = _capture_fps_metadata(project_id)
+    attempts = _attempts_for_project(project_id, metadata, paths, frame_count)
+    best_attempt = _best_attempt(attempts) if attempts else None
+    latest_attempt = _latest_attempt(attempts)
+    display_attempt = best_attempt or latest_attempt
+    display_paths = _attempt_paths_from_record(display_attempt, project_id)
 
-    if not metadata:
+    if not metadata and not attempts:
         dense_status = "Dense Reconstruction Not Started"
         sparse_status = "Not Started"
         viewer_mode = _viewer_mode(paths)
@@ -882,11 +1019,11 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
 
     previews = {
         Path(log_file).name: _safe_log_preview(Path(log_file))
-        for log_file in metadata["log_files"]
+        for log_file in (display_attempt.get("logFiles", []) if display_attempt else metadata["log_files"])
     }
-    sparse_status = metadata["status"]
+    sparse_status = display_attempt.get("status", metadata["status"]) if display_attempt else metadata["status"]
     dense_status = metadata["dense_status"]
-    viewer_mode = _viewer_mode(paths)
+    viewer_mode = _viewer_mode(display_paths)
     dense_previews = _dense_log_preview_summary(metadata["dense_log_files"])
     dense_support_missing = _dense_support_likely_missing(diag, dense_previews)
     dense_error_message = (
@@ -894,15 +1031,16 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         if dense_status == "Dense Reconstruction Failed" and dense_support_missing
         else metadata["dense_error_message"]
     )
-    sparse_point_count = _point_count(paths)
-    registered_image_count = _registered_image_count(paths)
-    registration_ratio = _registration_ratio(registered_image_count, metadata["input_frame_count"])
-    sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
+    sparse_point_count = int(display_attempt.get("sparsePointCount", 0)) if display_attempt else _point_count(paths)
+    registered_image_count = int(display_attempt.get("registeredImageCount", 0)) if display_attempt else _registered_image_count(paths)
+    extracted_frame_count = int(display_attempt.get("extractedFrameCount", metadata["input_frame_count"])) if display_attempt else metadata["input_frame_count"]
+    registration_ratio = float(display_attempt.get("registrationRatio", _registration_ratio(registered_image_count, extracted_frame_count))) if display_attempt else _registration_ratio(registered_image_count, metadata["input_frame_count"])
+    sparse_quality = str(display_attempt.get("sparseQualityLabel", _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count))) if display_attempt else _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
     dense_readiness = _dense_readiness(
         sparse_status,
         diag["denseReconstructionLikelyAvailable"],
         registered_image_count,
-        metadata["input_frame_count"],
+        extracted_frame_count,
         sparse_point_count,
         sparse_quality,
     )
@@ -916,37 +1054,42 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "colmapVersion": metadata["colmap_version"],
         "colmapCudaHint": diag["colmapCudaHint"],
         "denseReconstructionLikelyAvailable": diag["denseReconstructionLikelyAvailable"],
-        "inputFrameCount": metadata["input_frame_count"],
-        "selectedFpsMode": metadata["selected_fps_mode"],
-        "extractionFps": metadata["extraction_fps"],
-        "matchingMode": metadata["matching_mode"],
-        "matchingModeUsed": _matching_mode_display(metadata, sparse_status),
-        "sparseOutputExists": metadata["sparse_output_exists"],
-        "sparseModelFolders": metadata["sparse_model_folders"],
-        "sparsePointCloudAvailable": _point_cloud_available(paths),
+        "inputFrameCount": extracted_frame_count,
+        "selectedFpsMode": display_attempt.get("selectedFps", metadata["selected_fps_mode"]) if display_attempt else metadata["selected_fps_mode"],
+        "extractionFps": display_attempt.get("extractionFps", metadata["extraction_fps"]) if display_attempt else metadata["extraction_fps"],
+        "matchingMode": display_attempt.get("matchingMode", metadata["matching_mode"]) if display_attempt else metadata["matching_mode"],
+        "matchingModeUsed": display_attempt.get("matchingMode", _matching_mode_display(metadata, sparse_status)) if display_attempt else _matching_mode_display(metadata, sparse_status),
+        "sparseOutputExists": bool(display_attempt and display_attempt.get("status") == "Sparse Reconstruction Complete") or metadata["sparse_output_exists"],
+        "sparseModelFolders": display_attempt.get("sparseModelFolders", metadata["sparse_model_folders"]) if display_attempt else metadata["sparse_model_folders"],
+        "sparsePointCloudAvailable": _point_cloud_available(display_paths),
         "pointCount": sparse_point_count,
         "sparsePointCount": sparse_point_count,
-        "extractedFrameCount": metadata["input_frame_count"],
+        "extractedFrameCount": extracted_frame_count,
         "registeredImageCount": registered_image_count,
         "registrationRatio": registration_ratio,
-        "registrationRatioLabel": f"{registered_image_count}/{metadata['input_frame_count']} frames registered" if metadata["input_frame_count"] else "No extracted frames",
+        "registrationRatioLabel": f"{registered_image_count}/{extracted_frame_count} frames registered" if extracted_frame_count else "No extracted frames",
         "sparseQualityLabel": sparse_quality,
         "sparseReconstructionQuality": sparse_quality,
+        "reconstructionAttempts": attempts,
+        "bestAttempt": best_attempt,
+        "latestAttempt": latest_attempt,
+        "displayedAttempt": display_attempt,
+        "displayedAttemptRole": "Best attempt" if display_attempt and best_attempt and display_attempt["attemptId"] == best_attempt["attemptId"] else "Latest attempt",
         "denseReadiness": dense_readiness,
         "denseRecommended": dense_readiness["recommended"],
         "densePointCloudAvailable": _dense_point_cloud_available(paths),
         "densePointCount": _dense_point_count(paths),
-        "exportPathStatus": "available" if _point_file(paths).exists() else "missing",
+        "exportPathStatus": "available" if _point_file(display_paths).exists() else "missing",
         "viewerModeRecommendation": viewer_mode,
         "currentBestViewerMode": viewer_mode,
-        "logFiles": metadata["log_files"],
+        "logFiles": display_attempt.get("logFiles", metadata["log_files"]) if display_attempt else metadata["log_files"],
         "logPreviews": previews,
-        "logPreviewSummary": _log_preview_summary(metadata["log_files"]),
+        "logPreviewSummary": _log_preview_summary(display_attempt.get("logFiles", metadata["log_files"]) if display_attempt else metadata["log_files"]),
         "denseLogFiles": metadata["dense_log_files"],
         "denseLogPreviewSummary": dense_previews,
         "denseEndpointAvailable": True,
-        "detectedSparseModelPath": str(_detected_sparse_model_path(paths)) if _detected_sparse_model_path(paths) else None,
-        "sparseModelPathExists": bool(_detected_sparse_model_path(paths)),
+        "detectedSparseModelPath": str(_detected_sparse_model_path(display_paths)) if _detected_sparse_model_path(display_paths) else None,
+        "sparseModelPathExists": bool(_detected_sparse_model_path(display_paths)),
         "denseWorkspacePath": str(paths["dense_workspace"]),
         "denseLastError": dense_error_message,
         "warnings": metadata["warnings"],
@@ -978,6 +1121,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
     requested_matching_mode = normalize_matching_mode(matching_mode)
     matching_mode_used = _matching_mode_to_use(requested_matching_mode, project_id)
     capture_fps_mode, extraction_fps = _capture_fps_metadata(project_id)
+    attempt_id = str(uuid4())
 
     diag = diagnostics()
     if not diag["colmapAvailable"] or not diag["colmapPath"]:
@@ -1001,20 +1145,29 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
         project_repository.set_status(project_id, "Sparse Reconstruction Failed")
         raise ReconstructionError("COLMAP is required for sparse reconstruction but was not detected on PATH.")
 
-    paths = _workspace(project_id)
+    paths = _attempt_workspace(project_id, attempt_id)
     if paths["database"].exists():
         paths["database"].unlink()
-    for item in paths["sparse"].iterdir():
-        if item.is_dir():
-            shutil.rmtree(item)
-        elif item.is_file():
-            item.unlink()
-    if paths["exports"].exists():
-        shutil.rmtree(paths["exports"])
-    paths["exports"].mkdir(parents=True, exist_ok=True)
 
     started_at = datetime.now(timezone.utc).isoformat()
     project_repository.set_status(project_id, "Reconstructing Sparse Model")
+    reconstruction_repository.upsert_attempt(
+        attempt_id=attempt_id,
+        project_id=project_id,
+        extracted_frame_count=len(frames),
+        registered_image_count=0,
+        registration_ratio=0,
+        sparse_point_count=0,
+        sparse_quality_label="Poor Sparse Reconstruction",
+        matching_mode=matching_mode_used,
+        selected_fps=capture_fps_mode,
+        extraction_fps=extraction_fps,
+        status="Reconstructing Sparse Model",
+        output_path=str(paths["root"]),
+        log_files=[],
+        sparse_model_folders=[],
+        scene_analysis_summary={},
+    )
     reconstruction_repository.upsert_reconstruction_metadata(
         project_id=project_id,
         status="Reconstructing Sparse Model",
@@ -1076,6 +1229,25 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
         )
     except (ReconstructionError, subprocess.TimeoutExpired, OSError) as exc:
         message = str(exc)
+        reconstruction_repository.upsert_attempt(
+            attempt_id=attempt_id,
+            project_id=project_id,
+            extracted_frame_count=len(frames),
+            registered_image_count=_registered_image_count(paths),
+            registration_ratio=_registration_ratio(_registered_image_count(paths), len(frames)),
+            sparse_point_count=_point_count(paths),
+            sparse_quality_label=_sparse_quality_label(_registered_image_count(paths), _registration_ratio(_registered_image_count(paths), len(frames)), _point_count(paths)),
+            matching_mode=matching_mode_used,
+            selected_fps=capture_fps_mode,
+            extraction_fps=extraction_fps,
+            status="Sparse Reconstruction Failed",
+            output_path=str(paths["root"]),
+            log_files=_log_files(paths),
+            sparse_model_folders=_sparse_model_folders(paths),
+            scene_analysis_summary={},
+            failure_reason=message,
+        )
+        _update_best_attempt_marker(project_id)
         reconstruction_repository.upsert_reconstruction_metadata(
             project_id=project_id,
             status="Sparse Reconstruction Failed",
@@ -1104,6 +1276,49 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
     warnings = [] if sparse_exists else ["COLMAP completed but no sparse model files were found."]
     if conversion_warning:
         warnings.append(conversion_warning)
+    registered_image_count = _registered_image_count(paths)
+    registration_ratio = _registration_ratio(registered_image_count, len(frames))
+    sparse_point_count = _point_count(paths)
+    sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
+    reconstruction_repository.upsert_attempt(
+        attempt_id=attempt_id,
+        project_id=project_id,
+        extracted_frame_count=len(frames),
+        registered_image_count=registered_image_count,
+        registration_ratio=registration_ratio,
+        sparse_point_count=sparse_point_count,
+        sparse_quality_label=sparse_quality,
+        matching_mode=matching_mode_used,
+        selected_fps=capture_fps_mode,
+        extraction_fps=extraction_fps,
+        status=status,
+        output_path=str(paths["root"]),
+        log_files=_log_files(paths),
+        sparse_model_folders=_sparse_model_folders(paths),
+        scene_analysis_summary={},
+        failure_reason=None if sparse_exists else "No sparse model files were generated.",
+    )
+    _update_best_attempt_marker(project_id)
+    analysis = scene_analysis(project_id, attempt_id)
+    reconstruction_repository.upsert_attempt(
+        attempt_id=attempt_id,
+        project_id=project_id,
+        extracted_frame_count=len(frames),
+        registered_image_count=registered_image_count,
+        registration_ratio=registration_ratio,
+        sparse_point_count=sparse_point_count,
+        sparse_quality_label=sparse_quality,
+        matching_mode=matching_mode_used,
+        selected_fps=capture_fps_mode,
+        extraction_fps=extraction_fps,
+        status=status,
+        output_path=str(paths["root"]),
+        log_files=_log_files(paths),
+        sparse_model_folders=_sparse_model_folders(paths),
+        scene_analysis_summary=_scene_analysis_summary(analysis),
+        failure_reason=None if sparse_exists else "No sparse model files were generated.",
+    )
+    _update_best_attempt_marker(project_id)
     reconstruction_repository.upsert_reconstruction_metadata(
         project_id=project_id,
         status=status,
@@ -1133,7 +1348,10 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     if not metadata or metadata["status"] != "Sparse Reconstruction Complete":
         raise ReconstructionError("Run sparse reconstruction successfully before dense reconstruction.")
 
-    paths = _workspace(project_id)
+    legacy_paths = _workspace(project_id)
+    attempts = _attempts_for_project(project_id, metadata, legacy_paths, len(_frames(project_id)))
+    best_attempt = _best_attempt(attempts) if attempts else None
+    paths = _attempt_paths_from_record(best_attempt, project_id)
     sparse_model_path = _detected_sparse_model_path(paths)
     if not sparse_model_path:
         message = _sparse_model_missing_message(paths)
@@ -1265,12 +1483,21 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     return reconstruction_summary(project_id) or {}
 
 
-def point_cloud(project_id: str, max_points: int = POINT_CLOUD_MAX_POINTS) -> dict[str, Any] | None:
+def point_cloud(project_id: str, max_points: int = POINT_CLOUD_MAX_POINTS, attempt_id: str | None = None) -> dict[str, Any] | None:
     if not project_repository.get_project(project_id):
         return None
-    paths = _workspace(project_id)
+    legacy_paths = _workspace(project_id)
+    metadata = reconstruction_repository.get_reconstruction_metadata(project_id)
+    attempts = _attempts_for_project(project_id, metadata, legacy_paths, len(_frames(project_id)))
+    selected_attempt = next((attempt for attempt in attempts if attempt["attemptId"] == attempt_id), None) if attempt_id else (_best_attempt(attempts) if attempts else None)
+    paths = _attempt_paths_from_record(selected_attempt, project_id)
     max_points = max(1, min(max_points, POINT_CLOUD_MAX_POINTS))
-    return _parse_points3d(_point_file(paths), max_points=max_points)
+    result = _parse_points3d(_point_file(paths), max_points=max_points)
+    if selected_attempt:
+        result["attemptId"] = selected_attempt["attemptId"]
+        result["attemptLabel"] = selected_attempt.get("label") or _attempt_label(selected_attempt)
+        result["isBestAttempt"] = bool(selected_attempt.get("isBestAttempt"))
+    return result
 
 
 def dense_point_cloud(project_id: str, max_points: int = DENSE_POINT_CLOUD_MAX_POINTS) -> dict[str, Any] | None:

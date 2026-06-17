@@ -39,10 +39,12 @@ def _report_next_action(summary: dict[str, Any] | None) -> str:
         return "Run sparse reconstruction"
     if summary.get("denseStatus") == "Dense Reconstruction Failed" and summary.get("denseReconstructionLikelyAvailable") is False:
         return "Install a CUDA-enabled COLMAP build or use a visual preview pipeline"
-    if summary.get("denseStatus") in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
-        return "Run dense reconstruction"
     if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction":
         return "Improve capture and rerun sparse reconstruction"
+    if summary.get("denseReconstructionLikelyAvailable") is False:
+        return "Continue sparse scene preview or install CUDA-enabled COLMAP"
+    if summary.get("denseStatus") in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
+        return "Run dense reconstruction"
     if summary.get("denseReadiness", {}).get("ready"):
         return "Run dense reconstruction"
     return summary.get("recommendedNextAction") or "Run sparse reconstruction"
@@ -104,6 +106,11 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "registrationRatioLabel": reconstruction_summary["registrationRatioLabel"] if reconstruction_summary else "No extracted frames",
             "sparseQualityLabel": reconstruction_summary["sparseQualityLabel"] if reconstruction_summary else "Poor Sparse Reconstruction",
             "sparseReconstructionQuality": reconstruction_summary["sparseReconstructionQuality"] if reconstruction_summary else "Poor Sparse Reconstruction",
+            "reconstructionAttempts": reconstruction_summary["reconstructionAttempts"] if reconstruction_summary else [],
+            "bestAttempt": reconstruction_summary["bestAttempt"] if reconstruction_summary else None,
+            "latestAttempt": reconstruction_summary["latestAttempt"] if reconstruction_summary else None,
+            "displayedAttempt": reconstruction_summary["displayedAttempt"] if reconstruction_summary else None,
+            "displayedAttemptRole": reconstruction_summary["displayedAttemptRole"] if reconstruction_summary else None,
             "denseReadiness": reconstruction_summary["denseReadiness"] if reconstruction_summary else {"ready": False, "recommended": False, "reasons": ["sparse reconstruction is not complete"]},
             "densePointCount": reconstruction_summary["densePointCount"] if reconstruction_summary else 0,
             "colmapAvailable": reconstruction_summary["colmapAvailable"] if reconstruction_summary else False,

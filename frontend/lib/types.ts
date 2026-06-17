@@ -138,6 +138,11 @@ export type ReconstructionSummary = {
   registrationRatioLabel?: string;
   sparseQualityLabel?: string;
   sparseReconstructionQuality?: string;
+  reconstructionAttempts?: ReconstructionAttempt[];
+  bestAttempt?: ReconstructionAttempt | null;
+  latestAttempt?: ReconstructionAttempt | null;
+  displayedAttempt?: ReconstructionAttempt | null;
+  displayedAttemptRole?: "Best attempt" | "Latest attempt";
   denseReadiness?: {
     ready: boolean;
     recommended: boolean;
@@ -189,6 +194,28 @@ export type ReconstructionSummary = {
   nextStep: string;
 };
 
+export type ReconstructionAttempt = {
+  attemptId: string;
+  projectId: string;
+  createdAt: string;
+  extractedFrameCount: number;
+  registeredImageCount: number;
+  registrationRatio: number;
+  registrationRatioLabel?: string;
+  sparsePointCount: number;
+  sparseQualityLabel: string;
+  matchingMode: string;
+  selectedFps: string;
+  extractionFps: number;
+  status: string;
+  outputPath?: string | null;
+  sceneAnalysisSummary?: Record<string, unknown>;
+  isBestAttempt: boolean;
+  failureReason?: string | null;
+  label?: string;
+  source?: string;
+};
+
 export type ViewerModeRecommendation = "dense_point_cloud" | "sparse_point_cloud" | "prototype_preview";
 
 export type PointCloudPoint = {
@@ -205,6 +232,9 @@ export type PointCloudPoint = {
 export type PointCloudResponse = {
   available: boolean;
   source: "colmap_sparse" | "colmap_dense";
+  attemptId?: string;
+  attemptLabel?: string;
+  isBestAttempt?: boolean;
   pointCount: number;
   originalPointCount: number;
   returnedPointCount: number;

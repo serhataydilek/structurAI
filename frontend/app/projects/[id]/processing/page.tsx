@@ -24,6 +24,7 @@ export default function ProcessingPage() {
   const [matchingMode, setMatchingMode] = useState<ReconstructionMatchingMode>("Auto");
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [largeFrame, setLargeFrame] = useState<FramePreview | null>(null);
+  const [showAllFrames, setShowAllFrames] = useState(false);
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -94,6 +95,7 @@ export default function ProcessingPage() {
   const sparseComplete = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Complete";
   const denseComplete = reconstruction?.denseStatus === "Dense Reconstruction Complete";
   const denseReadiness = reconstruction?.denseReadiness;
+  const sparseQualityPoor = reconstruction?.sparseQualityLabel === "Poor Sparse Reconstruction";
   const canRunDense = sparseComplete && !denseComplete && colmapAvailable && !denseLikelyUnavailable && (denseReadiness?.ready ?? true);
   const denseRecommendedPath = denseLikelyUnavailable
     ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
@@ -103,6 +105,9 @@ export default function ProcessingPage() {
         ? "Use a visual preview pipeline such as Gaussian Splatting"
         : "Retry dense reconstruction with better capture";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
+  const attempts = reconstruction?.reconstructionAttempts ?? [];
+  const bestAttempt = reconstruction?.bestAttempt;
+  const latestAttempt = reconstruction?.latestAttempt;
   const selectedFrames = frames.length > 0
     ? [frames[0], frames[Math.floor(frames.length / 2)], frames[frames.length - 1]].filter((frame, index, all) => frame && all.findIndex((item) => item.filename === frame.filename) === index)
     : [];
@@ -383,6 +388,45 @@ export default function ProcessingPage() {
               Recommended next action: {reconstruction.recommendedNextAction}
             </div>
           )}
+          {attempts.length > 0 && (
+            <div className="mt-5 rounded-md border border-white/10 bg-slate-950/60 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Reconstruction Attempts</p>
+                  <p className="mt-1 text-xs text-slate-400">The viewer uses the best sparse attempt by default, not necessarily the latest run.</p>
+                </div>
+                <Link href={`/projects/${params.id}/viewer`} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">
+                  View Best Attempt
+                </Link>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-xs text-slate-500">Best attempt</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{bestAttempt?.label ?? "Unavailable"}</p>
+                </div>
+                <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-xs text-slate-500">Latest attempt</p>
+                  <p className="mt-1 text-sm font-semibold text-white">{latestAttempt?.label ?? "Unavailable"}</p>
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {attempts.map((attempt) => (
+                  <div key={attempt.attemptId} className={`rounded-md border p-3 text-sm ${attempt.isBestAttempt ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-300"}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span>{attempt.label}</span>
+                      <span className="text-xs">{attempt.isBestAttempt ? "Best attempt" : attempt.status}</span>
+                    </div>
+                    {attempt.failureReason && <p className="mt-1 text-xs text-red-100/80">{attempt.failureReason}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {sparseQualityPoor && (reconstruction?.registeredImageCount ?? 0) > 0 && (
+            <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+              Only {reconstruction?.registeredImageCount ?? 0} out of {reconstruction?.extractedFrameCount ?? reconstruction?.inputFrameCount ?? 0} frames were registered by COLMAP. This means most frames could not be matched reliably.
+            </div>
+          )}
           {(reconstruction?.warnings ?? []).length > 0 && (
             <div className="mt-4 space-y-2">
               {(reconstruction?.warnings ?? []).map((warning) => (
@@ -405,13 +449,15 @@ export default function ProcessingPage() {
                 Phase 3A runs COLMAP image undistortion, patch match stereo, and stereo fusion to produce a dense point cloud. It does not generate a mesh or GLB.
               </p>
             </div>
-            <button
-              disabled={!canRunDense || denseReconstructing}
-              onClick={onRunDenseReconstruction}
-              className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
-            </button>
+            {!denseLikelyUnavailable && !sparseQualityPoor && (
+              <button
+                disabled={!canRunDense || denseReconstructing}
+                onClick={onRunDenseReconstruction}
+                className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+              </button>
+            )}
           </div>
 
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
@@ -470,6 +516,23 @@ export default function ProcessingPage() {
             <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
               Run sparse reconstruction successfully before dense reconstruction.
             </div>
+          )}
+          {sparseQualityPoor && (
+            <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+              Dense reconstruction is not recommended because the sparse reconstruction is too weak.
+            </div>
+          )}
+          {(denseLikelyUnavailable || sparseQualityPoor) && (
+            <details className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced dense reconstruction action</summary>
+              <button
+                disabled={!canRunDense || denseReconstructing}
+                onClick={onRunDenseReconstruction}
+                className="mt-3 rounded-md border border-white/10 px-4 py-2 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+              </button>
+            </details>
           )}
           {(denseReconstructionError || reconstruction?.denseStatus === "Dense Reconstruction Failed") && (
             <div className="mt-4 rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-100">
@@ -532,16 +595,21 @@ export default function ProcessingPage() {
                 </button>
               ))}
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-              {frames.slice(0, 12).map((frame) => (
-                <div key={frame.filename} className="overflow-hidden rounded-md border border-white/10 bg-slate-950">
-                  <button type="button" onClick={() => setLargeFrame(frame)} className="block w-full">
-                    <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-28 w-full object-cover" />
-                  </button>
-                  <p className="truncate px-2 py-2 text-xs text-slate-400">{frame.filename}</p>
-                </div>
-              ))}
-            </div>
+            <details className="mt-4" open={showAllFrames} onToggle={(event) => setShowAllFrames(event.currentTarget.open)}>
+              <summary className="cursor-pointer rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200">
+                Show all frames
+              </summary>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {frames.map((frame) => (
+                  <div key={frame.filename} className="overflow-hidden rounded-md border border-white/10 bg-slate-950">
+                    <button type="button" onClick={() => setLargeFrame(frame)} className="block w-full">
+                      <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-28 w-full object-cover" />
+                    </button>
+                    <p className="truncate px-2 py-2 text-xs text-slate-400">{frame.filename}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
             </>
           )}
         </section>

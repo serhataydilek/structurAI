@@ -101,16 +101,18 @@ export function getReconstructionSummary(projectId: string) {
   return request<ReconstructionSummary>(`/projects/${projectId}/reconstruction-summary`);
 }
 
-export function getPointCloud(projectId: string, maxPoints = 50000) {
-  return request<PointCloudResponse>(`/projects/${projectId}/point-cloud?max_points=${maxPoints}`);
+export function getPointCloud(projectId: string, maxPoints = 50000, attemptId?: string) {
+  const attemptParam = attemptId ? `&attempt_id=${encodeURIComponent(attemptId)}` : "";
+  return request<PointCloudResponse>(`/projects/${projectId}/point-cloud?max_points=${maxPoints}${attemptParam}`);
 }
 
 export function getDensePointCloud(projectId: string, maxPoints = 100000) {
   return request<PointCloudResponse>(`/projects/${projectId}/dense-point-cloud?max_points=${maxPoints}`);
 }
 
-export function getSceneAnalysis(projectId: string) {
-  return request<SceneAnalysis>(`/projects/${projectId}/scene-analysis`);
+export function getSceneAnalysis(projectId: string, attemptId?: string) {
+  const attemptParam = attemptId ? `?attempt_id=${encodeURIComponent(attemptId)}` : "";
+  return request<SceneAnalysis>(`/projects/${projectId}/scene-analysis${attemptParam}`);
 }
 
 export function getModel(projectId: string) {

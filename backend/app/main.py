@@ -238,8 +238,8 @@ def get_reconstruction_summary(project_id: str) -> dict:
 
 
 @app.get("/projects/{project_id}/point-cloud")
-def get_point_cloud(project_id: str, max_points: int = 50000) -> dict:
-    point_cloud = reconstruction_service.point_cloud(project_id, max_points=max_points)
+def get_point_cloud(project_id: str, max_points: int = 50000, attempt_id: str | None = None) -> dict:
+    point_cloud = reconstruction_service.point_cloud(project_id, max_points=max_points, attempt_id=attempt_id)
     if point_cloud is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return point_cloud
@@ -254,8 +254,8 @@ def get_dense_point_cloud(project_id: str, max_points: int = 100000) -> dict:
 
 
 @app.get("/projects/{project_id}/scene-analysis")
-def get_scene_analysis(project_id: str) -> dict:
-    analysis = reconstruction_service.scene_analysis(project_id)
+def get_scene_analysis(project_id: str, attempt_id: str | None = None) -> dict:
+    analysis = reconstruction_service.scene_analysis(project_id, attempt_id=attempt_id)
     if analysis is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return analysis

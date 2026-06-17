@@ -35,6 +35,7 @@ export default function ViewerPage() {
   const [showReference, setShowReference] = useState(true);
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string>("");
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -56,8 +57,10 @@ export default function ViewerPage() {
         loadedDense = await getDensePointCloud(params.id).catch(() => null);
       }
       if (next.sparsePointCloudAvailable) {
-        loadedSparse = await getPointCloud(params.id).catch(() => null);
-        loadedSceneAnalysis = await getSceneAnalysis(params.id).catch(() => null);
+        const attemptId = selectedAttemptId || next.bestAttempt?.attemptId || next.displayedAttempt?.attemptId;
+        if (!selectedAttemptId && attemptId) setSelectedAttemptId(attemptId);
+        loadedSparse = await getPointCloud(params.id, 50000, attemptId).catch(() => null);
+        loadedSceneAnalysis = await getSceneAnalysis(params.id, attemptId).catch(() => null);
       }
       setDensePointCloud(loadedDense);
       setSparsePointCloud(loadedSparse);
@@ -72,6 +75,18 @@ export default function ViewerPage() {
       setSceneAnalysis(null);
       return null;
     }
+  }
+
+  async function onSelectAttempt(attemptId: string) {
+    setSelectedAttemptId(attemptId);
+    const [nextPointCloud, nextSceneAnalysis] = await Promise.all([
+      getPointCloud(params.id, 50000, attemptId).catch(() => null),
+      getSceneAnalysis(params.id, attemptId).catch(() => null)
+    ]);
+    setSparsePointCloud(nextPointCloud);
+    setSceneAnalysis(nextSceneAnalysis);
+    setPointCloud(densePointCloud?.available && viewerMode === "dense" ? densePointCloud : nextPointCloud);
+    setViewerResetKey((current) => current + 1);
   }
 
   async function onRunSparseReconstruction() {
@@ -169,6 +184,8 @@ export default function ViewerPage() {
   const registeredImageCount = reconstruction?.registeredImageCount ?? 0;
   const registrationRatioLabel = reconstruction?.registrationRatioLabel ?? "0%";
   const sparseQualityLabel = reconstruction?.sparseQualityLabel ?? "Not Started";
+  const attempts = reconstruction?.reconstructionAttempts ?? [];
+  const selectedAttempt = attempts.find((attempt) => attempt.attemptId === selectedAttemptId) ?? reconstruction?.displayedAttempt ?? reconstruction?.bestAttempt;
   const room = sceneAnalysis?.roomScaffold;
   const denseAvailabilityText = denseLikelyUnavailable
     ? "Dense reconstruction requires a CUDA-enabled COLMAP build on this machine."
@@ -244,6 +261,49 @@ export default function ViewerPage() {
             <div className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">
               Next action: {reconstruction?.recommendedNextAction ?? "Run sparse reconstruction"}
             </div>
+            {attempts.length > 0 && (
+              <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Reconstruction Attempt</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Current displayed attempt: {selectedAttempt?.isBestAttempt ? "Best attempt" : "Latest attempt"}
+                    </p>
+                  </div>
+                  <select
+                    value={selectedAttemptId || selectedAttempt?.attemptId || ""}
+                    onChange={(event) => onSelectAttempt(event.target.value)}
+                    className="rounded-md border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-brand"
+                  >
+                    {attempts.map((attempt) => (
+                      <option key={attempt.attemptId} value={attempt.attemptId}>
+                        {attempt.label ?? `${attempt.sparseQualityLabel} - ${attempt.registeredImageCount}/${attempt.extractedFrameCount} registered - ${attempt.sparsePointCount} points`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {selectedAttempt && (
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <div>
+                      <p className="text-xs text-slate-500">Registered</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registeredImageCount}/{selectedAttempt.extractedFrameCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Ratio</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registrationRatioLabel ?? `${Math.round(selectedAttempt.registrationRatio * 100)}%`}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Sparse points</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.sparsePointCount}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Quality</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.sparseQualityLabel}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {sparseSceneAvailable && (
               <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -382,13 +442,16 @@ export default function ViewerPage() {
                     ? "Your current COLMAP build appears to be without CUDA. Dense reconstruction may fail or be unavailable."
                     : "Sparse reconstruction exists, but registration quality is too weak for a reliable dense run."}
                 </p>
-                <button
-                  disabled={denseReconstructing || denseLikelyUnavailable || !denseReady}
-                  onClick={onRunDenseReconstruction}
-                  className="mt-3 rounded-md border border-amber-300/30 px-4 py-2 text-sm font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
-                </button>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-amber-100">Advanced dense reconstruction action</summary>
+                  <button
+                    disabled={denseReconstructing || denseLikelyUnavailable || !denseReady}
+                    onClick={onRunDenseReconstruction}
+                    className="mt-3 rounded-md border border-amber-300/30 px-4 py-2 text-sm font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+                  </button>
+                </details>
               </div>
             )}
             {reconstructing && (
