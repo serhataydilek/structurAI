@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import math
 import shutil
 import subprocess
 from typing import Any
@@ -258,19 +259,26 @@ def _dense_point_file(paths: dict[str, Path]) -> Path:
     return paths["dense_workspace"] / "fused.ply"
 
 
-def _parse_points3d(path: Path, max_points: int = POINT_CLOUD_MAX_POINTS) -> dict[str, Any]:
-    if not path.exists():
-        return {
-            "available": False,
-            "source": "colmap_sparse",
-            "pointCount": 0,
-            "originalPointCount": 0,
-            "returnedPointCount": 0,
-            "points": [],
-            "message": "Sparse point cloud export is not available.",
-        }
+def _percentile(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = (len(ordered) - 1) * max(0.0, min(100.0, percentile)) / 100.0
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return ordered[int(rank)]
+    weight = rank - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
 
-    parsed: list[dict[str, float | int]] = []
+
+def _parse_sparse_points(path: Path) -> list[dict[str, float | int]]:
+    if not path.exists():
+        return []
+
+    points: list[dict[str, float | int]] = []
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
             if not line.strip() or line.startswith("#"):
@@ -279,7 +287,7 @@ def _parse_points3d(path: Path, max_points: int = POINT_CLOUD_MAX_POINTS) -> dic
             if len(parts) < 8:
                 continue
             try:
-                parsed.append(
+                points.append(
                     {
                         "id": int(parts[0]),
                         "x": float(parts[1]),
@@ -293,7 +301,22 @@ def _parse_points3d(path: Path, max_points: int = POINT_CLOUD_MAX_POINTS) -> dic
                 )
             except ValueError:
                 continue
+    return points
 
+
+def _parse_points3d(path: Path, max_points: int = POINT_CLOUD_MAX_POINTS) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "available": False,
+            "source": "colmap_sparse",
+            "pointCount": 0,
+            "originalPointCount": 0,
+            "returnedPointCount": 0,
+            "points": [],
+            "message": "Sparse point cloud export is not available.",
+        }
+
+    parsed = _parse_sparse_points(path)
     original_count = len(parsed)
     if original_count > max_points:
         step = max(1, original_count // max_points)
@@ -417,6 +440,182 @@ def _dense_point_cloud_available(paths: dict[str, Path]) -> bool:
 
 def _dense_point_count(paths: dict[str, Path]) -> int:
     return int(_parse_ply_points(_dense_point_file(paths), max_points=1)["originalPointCount"])
+
+
+def _images_txt_path(paths: dict[str, Path]) -> Path | None:
+    exported = _export_dir(paths) / "images.txt"
+    if exported.exists():
+        return exported
+    sparse_model_path = _detected_sparse_model_path(paths)
+    if sparse_model_path and (sparse_model_path / "images.txt").exists():
+        return sparse_model_path / "images.txt"
+    return None
+
+
+def _rotation_matrix_from_qvec(qvec: list[float]) -> list[list[float]]:
+    qw, qx, qy, qz = qvec
+    return [
+        [1 - 2 * qy * qy - 2 * qz * qz, 2 * qx * qy - 2 * qz * qw, 2 * qx * qz + 2 * qy * qw],
+        [2 * qx * qy + 2 * qz * qw, 1 - 2 * qx * qx - 2 * qz * qz, 2 * qy * qz - 2 * qx * qw],
+        [2 * qx * qz - 2 * qy * qw, 2 * qy * qz + 2 * qx * qw, 1 - 2 * qx * qx - 2 * qy * qy],
+    ]
+
+
+def _camera_center_from_pose(qvec: list[float], tvec: list[float]) -> dict[str, float]:
+    rotation = _rotation_matrix_from_qvec(qvec)
+    return {
+        "x": -(rotation[0][0] * tvec[0] + rotation[1][0] * tvec[1] + rotation[2][0] * tvec[2]),
+        "y": -(rotation[0][1] * tvec[0] + rotation[1][1] * tvec[1] + rotation[2][1] * tvec[2]),
+        "z": -(rotation[0][2] * tvec[0] + rotation[1][2] * tvec[1] + rotation[2][2] * tvec[2]),
+    }
+
+
+def _camera_path(paths: dict[str, Path]) -> dict[str, Any]:
+    images_txt = _images_txt_path(paths)
+    if not images_txt:
+        return {
+            "available": False,
+            "positions": [],
+            "message": "COLMAP images.txt is not available; camera path cannot be estimated.",
+        }
+
+    positions: list[dict[str, Any]] = []
+    try:
+        lines = images_txt.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if len(parts) < 10:
+                continue
+            try:
+                image_id = int(parts[0])
+                qvec = [float(parts[index]) for index in range(1, 5)]
+                tvec = [float(parts[index]) for index in range(5, 8)]
+                image_name = parts[9]
+            except ValueError:
+                continue
+            center = _camera_center_from_pose(qvec, tvec)
+            positions.append({"imageId": image_id, "imageName": image_name, **center})
+    except OSError as exc:
+        return {"available": False, "positions": [], "message": f"Unable to parse camera path: {exc}"}
+
+    positions.sort(key=lambda item: item["imageId"])
+    return {
+        "available": len(positions) > 0,
+        "positions": positions[:500],
+        "message": "Camera path estimated from COLMAP registered image poses." if positions else "No registered image poses were found in images.txt.",
+    }
+
+
+def _scene_confidence(point_count: int, width: float, depth: float, height: float, camera_count: int) -> str:
+    meaningful_dimensions = sum(1 for value in (width, depth, height) if value > 0.25)
+    if point_count >= 4000 and meaningful_dimensions >= 3 and camera_count >= 10:
+        return "High"
+    if point_count >= 700 and meaningful_dimensions >= 2:
+        return "Medium"
+    return "Low"
+
+
+def scene_analysis(project_id: str) -> dict[str, Any] | None:
+    if not project_repository.get_project(project_id):
+        return None
+
+    paths = _workspace(project_id)
+    points = _parse_sparse_points(_point_file(paths))
+    diag = diagnostics()
+    dense_support_missing = diag["denseReconstructionLikelyAvailable"] is False
+    if not points:
+        return {
+            "available": False,
+            "pointCount": 0,
+            "boundingBox": None,
+            "center": None,
+            "scale": 1,
+            "floorEstimate": None,
+            "roomScaffold": None,
+            "cameraPath": _camera_path(paths),
+            "confidence": "Low",
+            "warnings": ["Sparse point cloud is not available; scene analysis cannot estimate room bounds."],
+            "message": "Run sparse reconstruction before opening the sparse scene preview.",
+        }
+
+    xs = [float(point["x"]) for point in points]
+    ys = [float(point["y"]) for point in points]
+    zs = [float(point["z"]) for point in points]
+    raw_min_x, raw_max_x = min(xs), max(xs)
+    raw_min_y, raw_max_y = min(ys), max(ys)
+    raw_min_z, raw_max_z = min(zs), max(zs)
+    robust_min_x, robust_max_x = _percentile(xs, 2), _percentile(xs, 98)
+    robust_min_y, robust_max_y = _percentile(ys, 2), _percentile(ys, 98)
+    robust_min_z, robust_max_z = _percentile(zs, 2), _percentile(zs, 98)
+
+    center = {
+        "x": (robust_min_x + robust_max_x) / 2,
+        "y": (robust_min_y + robust_max_y) / 2,
+        "z": (robust_min_z + robust_max_z) / 2,
+    }
+    width = max(0.0, robust_max_x - robust_min_x)
+    height = max(0.0, robust_max_y - robust_min_y)
+    depth = max(0.0, robust_max_z - robust_min_z)
+    max_dimension = max(width, height, depth, 0.001)
+    scale = 4 / max_dimension
+    floor_level = _percentile(ys, 5)
+    camera_path = _camera_path(paths)
+    confidence = _scene_confidence(len(points), width, depth, height, len(camera_path["positions"]))
+
+    warnings = [
+        "Room scaffold is estimated from sparse feature points, not measured geometry.",
+        "Sparse bounding boxes may include outliers from reflective, repeated, or distant features.",
+    ]
+    if len(points) < 1000:
+        warnings.insert(0, "Sparse point count is low; scene bounds may be unstable.")
+    if dense_support_missing:
+        warnings.append("Dense reconstruction requires a CUDA-enabled COLMAP build on this machine.")
+
+    return {
+        "available": True,
+        "pointCount": len(points),
+        "boundingBox": {
+            "minX": raw_min_x,
+            "maxX": raw_max_x,
+            "minY": raw_min_y,
+            "maxY": raw_max_y,
+            "minZ": raw_min_z,
+            "maxZ": raw_max_z,
+            "robustMinX": robust_min_x,
+            "robustMaxX": robust_max_x,
+            "robustMinY": robust_min_y,
+            "robustMaxY": robust_max_y,
+            "robustMinZ": robust_min_z,
+            "robustMaxZ": robust_max_z,
+        },
+        "center": center,
+        "scale": scale,
+        "suggestedCameraTarget": center,
+        "suggestedCameraDistance": max_dimension * 1.45,
+        "floorEstimate": {
+            "axis": "y",
+            "level": floor_level,
+            "method": "5th percentile of sparse point Y coordinates",
+        },
+        "roomScaffold": {
+            "width": width,
+            "depth": depth,
+            "height": height,
+            "minX": robust_min_x,
+            "maxX": robust_max_x,
+            "minY": floor_level,
+            "maxY": robust_max_y,
+            "minZ": robust_min_z,
+            "maxZ": robust_max_z,
+        },
+        "cameraPath": camera_path,
+        "confidence": confidence,
+        "warnings": warnings,
+        "message": "Sparse scene preview combines real COLMAP sparse points with estimated room bounds for readability.",
+    }
 
 
 def normalize_matching_mode(mode: str | None) -> str:

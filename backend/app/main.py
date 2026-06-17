@@ -253,6 +253,14 @@ def get_dense_point_cloud(project_id: str, max_points: int = 100000) -> dict:
     return point_cloud
 
 
+@app.get("/projects/{project_id}/scene-analysis")
+def get_scene_analysis(project_id: str) -> dict:
+    analysis = reconstruction_service.scene_analysis(project_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return analysis
+
+
 @app.delete("/projects/{project_id}")
 def delete_project(project_id: str) -> dict[str, str]:
     if not project_repository.get_project(project_id):
