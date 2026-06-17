@@ -137,6 +137,9 @@ export type ReconstructionSummary = {
   registeredImageCount?: number;
   registrationRatio?: number;
   registrationRatioLabel?: string;
+  selectedRegistrationRatio?: number;
+  sourceRegistrationRatio?: number;
+  sourceRegistrationRatioLabel?: string;
   sparseQualityLabel?: string;
   sparseReconstructionQuality?: string;
   sourceFrameCount?: number;
@@ -211,6 +214,9 @@ export type ReconstructionAttempt = {
   registeredImageCount: number;
   registrationRatio: number;
   registrationRatioLabel?: string;
+  selectedRegistrationRatio?: number;
+  sourceRegistrationRatio?: number;
+  sourceRegistrationRatioLabel?: string;
   sparsePointCount: number;
   sparseQualityLabel: string;
   matchingMode: string;
@@ -223,6 +229,30 @@ export type ReconstructionAttempt = {
   failureReason?: string | null;
   label?: string;
   source?: string;
+};
+
+export type SparseSweepAttempt = {
+  attemptId?: string | null;
+  frameSelectionMode?: string | null;
+  matchingMode?: string | null;
+  selectedFrameCount: number;
+  registeredImageCount: number;
+  selectedRegistrationRatio: number;
+  registrationRatioLabel?: string;
+  sparsePointCount: number;
+  sparseQualityLabel: string;
+  status: string;
+  score: number;
+  isBestAttempt: boolean;
+  error?: string | null;
+};
+
+export type SparseSweepResponse = {
+  projectId: string;
+  status: string;
+  attempts: SparseSweepAttempt[];
+  bestAttempt?: ReconstructionAttempt | null;
+  summary: ReconstructionSummary;
 };
 
 export type FrameSelectionPreview = {

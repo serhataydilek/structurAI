@@ -227,6 +227,17 @@ def run_sparse_reconstruction(project_id: str, payload: SparseReconstructionOpti
         raise HTTPException(status_code=400, detail={"message": str(exc), "summary": summary}) from exc
 
 
+@app.post("/projects/{project_id}/reconstruct/sparse/sweep")
+def run_sparse_reconstruction_sweep(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        return reconstruction_service.run_sparse_reconstruction_sweep(project_id)
+    except reconstruction_service.ReconstructionError as exc:
+        summary = reconstruction_service.reconstruction_summary(project_id)
+        raise HTTPException(status_code=400, detail={"message": str(exc), "summary": summary}) from exc
+
+
 @app.post("/projects/{project_id}/frame-selection/preview")
 def preview_frame_selection(project_id: str, payload: FrameSelectionPreviewOptions | None = None) -> dict:
     preview = reconstruction_service.frame_selection_preview(project_id, payload.mode if payload else "Balanced subset")

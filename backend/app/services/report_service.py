@@ -10,8 +10,8 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
     if mode == "dense_point_cloud":
         return "Dense point cloud preview"
     if summary and summary.get("sparsePointCloudAvailable"):
-        return "Sparse scene preview"
-    return "No reconstruction output yet"
+        return "Sparse point cloud preview"
+    return "Prototype digital twin preview"
 
 
 def _limitations(summary: dict[str, Any] | None) -> list[str]:
@@ -104,6 +104,9 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "registeredImageCount": reconstruction_summary["registeredImageCount"] if reconstruction_summary else 0,
             "registrationRatio": reconstruction_summary["registrationRatio"] if reconstruction_summary else 0,
             "registrationRatioLabel": reconstruction_summary["registrationRatioLabel"] if reconstruction_summary else "No extracted frames",
+            "selectedRegistrationRatio": reconstruction_summary["selectedRegistrationRatio"] if reconstruction_summary else 0,
+            "sourceRegistrationRatio": reconstruction_summary["sourceRegistrationRatio"] if reconstruction_summary else 0,
+            "sourceRegistrationRatioLabel": reconstruction_summary["sourceRegistrationRatioLabel"] if reconstruction_summary else "No source frames",
             "sourceFrameCount": reconstruction_summary["sourceFrameCount"] if reconstruction_summary else 0,
             "selectedFrameCount": reconstruction_summary["selectedFrameCount"] if reconstruction_summary else 0,
             "frameSelectionMode": reconstruction_summary["frameSelectionMode"] if reconstruction_summary else "Balanced subset",

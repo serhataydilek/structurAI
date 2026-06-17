@@ -717,12 +717,35 @@ def _attempt_score(attempt: dict[str, Any]) -> tuple[int, int, int, int]:
     )
 
 
+def _attempt_score_value(attempt: dict[str, Any]) -> int:
+    quality_rank, registered, points, ratio = _attempt_score(attempt)
+    return (quality_rank * 1_000_000_000) + (registered * 1_000_000) + (points * 100) + ratio
+
+
+def _with_registration_labels(attempt: dict[str, Any]) -> dict[str, Any]:
+    item = dict(attempt)
+    registered = int(item.get("registeredImageCount") or 0)
+    selected = int(item.get("selectedFrameCount") or item.get("extractedFrameCount") or 0)
+    source = int(item.get("sourceFrameCount") or item.get("extractedFrameCount") or selected)
+    selected_ratio = _registration_ratio(registered, selected)
+    source_ratio = _registration_ratio(registered, source)
+    item["selectedFrameCount"] = selected
+    item["sourceFrameCount"] = source
+    item["selectedRegistrationRatio"] = selected_ratio
+    item["sourceRegistrationRatio"] = source_ratio
+    item["registrationRatio"] = selected_ratio
+    item["registrationRatioLabel"] = f"{registered}/{selected} selected frames registered" if selected else "No selected frames"
+    item["sourceRegistrationRatioLabel"] = f"{registered}/{source} source frames registered" if source else "No source frames"
+    item["score"] = _attempt_score_value(item)
+    return item
+
+
 def _attempt_label(attempt: dict[str, Any]) -> str:
     quality = str(attempt.get("sparseQualityLabel") or "Unknown").replace(" Sparse Reconstruction", "")
     registered = int(attempt.get("registeredImageCount") or 0)
-    extracted = int(attempt.get("extractedFrameCount") or 0)
+    selected = int(attempt.get("selectedFrameCount") or attempt.get("extractedFrameCount") or 0)
     points = int(attempt.get("sparsePointCount") or 0)
-    return f"{quality} - {registered}/{extracted} registered - {points} points"
+    return f"{quality} - {registered}/{selected} selected - {points} points"
 
 
 def _scene_analysis_summary(analysis: dict[str, Any] | None) -> dict[str, Any]:
@@ -757,7 +780,7 @@ def _legacy_attempt(project_id: str, metadata: dict[str, Any] | None, paths: dic
         "selectedFrameFolder": str(_frames_dir(project_id)),
         "registeredImageCount": registered,
         "registrationRatio": ratio,
-        "registrationRatioLabel": f"{registered}/{extracted} frames registered" if extracted else "No extracted frames",
+        "registrationRatioLabel": f"{registered}/{extracted} selected frames registered" if extracted else "No selected frames",
         "sparsePointCount": sparse_point_count,
         "sparseQualityLabel": quality,
         "matchingMode": _matching_mode_display(metadata, status) if metadata else "Unknown / legacy sparse run",
@@ -786,10 +809,10 @@ def _attempts_for_project(project_id: str, metadata: dict[str, Any] | None, path
     normalized = []
     for attempt in attempts:
         item = dict(attempt)
-        item["registrationRatioLabel"] = f"{item['registeredImageCount']}/{item['extractedFrameCount']} frames registered" if item["extractedFrameCount"] else "No extracted frames"
         item["sourceFrameCount"] = item.get("sourceFrameCount") or item["extractedFrameCount"]
         item["selectedFrameCount"] = item.get("selectedFrameCount") or item["extractedFrameCount"]
         item["frameSelectionMode"] = item.get("frameSelectionMode") or "All frames"
+        item = _with_registration_labels(item)
         item["isBestAttempt"] = item["attemptId"] == best_id
         item["label"] = _attempt_label(item)
         normalized.append(item)
@@ -1192,13 +1215,16 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
     sparse_point_count = int(display_attempt.get("sparsePointCount", 0)) if display_attempt else _point_count(paths)
     registered_image_count = int(display_attempt.get("registeredImageCount", 0)) if display_attempt else _registered_image_count(paths)
     extracted_frame_count = int(display_attempt.get("extractedFrameCount", metadata["input_frame_count"])) if display_attempt else metadata["input_frame_count"]
-    registration_ratio = float(display_attempt.get("registrationRatio", _registration_ratio(registered_image_count, extracted_frame_count))) if display_attempt else _registration_ratio(registered_image_count, metadata["input_frame_count"])
+    selected_frame_count = int(display_attempt.get("selectedFrameCount", extracted_frame_count)) if display_attempt else extracted_frame_count
+    source_frame_count = int(display_attempt.get("sourceFrameCount", extracted_frame_count)) if display_attempt else extracted_frame_count
+    registration_ratio = float(display_attempt.get("selectedRegistrationRatio", display_attempt.get("registrationRatio", _registration_ratio(registered_image_count, selected_frame_count)))) if display_attempt else _registration_ratio(registered_image_count, selected_frame_count)
+    source_registration_ratio = _registration_ratio(registered_image_count, source_frame_count)
     sparse_quality = str(display_attempt.get("sparseQualityLabel", _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count))) if display_attempt else _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
     dense_readiness = _dense_readiness(
         sparse_status,
         diag["denseReconstructionLikelyAvailable"],
         registered_image_count,
-        extracted_frame_count,
+        selected_frame_count,
         sparse_point_count,
         sparse_quality,
     )
@@ -1223,13 +1249,16 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "pointCount": sparse_point_count,
         "sparsePointCount": sparse_point_count,
         "extractedFrameCount": extracted_frame_count,
-        "sourceFrameCount": display_attempt.get("sourceFrameCount", extracted_frame_count) if display_attempt else extracted_frame_count,
-        "selectedFrameCount": display_attempt.get("selectedFrameCount", extracted_frame_count) if display_attempt else extracted_frame_count,
+        "sourceFrameCount": source_frame_count,
+        "selectedFrameCount": selected_frame_count,
         "frameSelectionMode": display_attempt.get("frameSelectionMode", "All frames") if display_attempt else "All frames",
         "selectedFrameFolder": display_attempt.get("selectedFrameFolder") if display_attempt else str(_frames_dir(project_id)),
         "registeredImageCount": registered_image_count,
         "registrationRatio": registration_ratio,
-        "registrationRatioLabel": f"{registered_image_count}/{extracted_frame_count} frames registered" if extracted_frame_count else "No extracted frames",
+        "selectedRegistrationRatio": registration_ratio,
+        "sourceRegistrationRatio": source_registration_ratio,
+        "registrationRatioLabel": f"{registered_image_count}/{selected_frame_count} selected frames registered" if selected_frame_count else "No selected frames",
+        "sourceRegistrationRatioLabel": f"{registered_image_count}/{source_frame_count} source frames registered" if source_frame_count else "No source frames",
         "sparseQualityLabel": sparse_quality,
         "sparseReconstructionQuality": sparse_quality,
         "reconstructionAttempts": attempts,
@@ -1269,6 +1298,79 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
 
 def reconstruction_summary(project_id: str) -> dict[str, Any] | None:
     return _base_summary(project_id)
+
+
+def _sweep_attempt_result(attempt: dict[str, Any] | None, error: str | None = None) -> dict[str, Any]:
+    if not attempt:
+        return {
+            "attemptId": None,
+            "frameSelectionMode": None,
+            "matchingMode": None,
+            "selectedFrameCount": 0,
+            "registeredImageCount": 0,
+            "selectedRegistrationRatio": 0,
+            "sparsePointCount": 0,
+            "sparseQualityLabel": "Failed",
+            "status": "Sparse Reconstruction Failed",
+            "score": 0,
+            "isBestAttempt": False,
+            "error": error,
+        }
+    item = _with_registration_labels(attempt)
+    return {
+        "attemptId": item.get("attemptId"),
+        "frameSelectionMode": item.get("frameSelectionMode"),
+        "matchingMode": item.get("matchingMode"),
+        "selectedFrameCount": item.get("selectedFrameCount"),
+        "registeredImageCount": item.get("registeredImageCount"),
+        "selectedRegistrationRatio": item.get("selectedRegistrationRatio"),
+        "registrationRatioLabel": item.get("registrationRatioLabel"),
+        "sparsePointCount": item.get("sparsePointCount"),
+        "sparseQualityLabel": item.get("sparseQualityLabel"),
+        "status": item.get("status"),
+        "score": item.get("score"),
+        "isBestAttempt": item.get("isBestAttempt", False),
+        "error": error or item.get("failureReason"),
+    }
+
+
+def run_sparse_reconstruction_sweep(project_id: str) -> dict[str, Any]:
+    if not project_repository.get_project(project_id):
+        raise ReconstructionError("Project not found")
+    if not _frames(project_id):
+        raise ReconstructionError("No extracted frames found. Process the capture before running sparse reconstruction.")
+
+    configs = [
+        {"frameSelectionMode": "Balanced subset", "matchingMode": "Video Sequential"},
+        {"frameSelectionMode": "Sharpest subset", "matchingMode": "Video Sequential"},
+        {"frameSelectionMode": "Evenly spaced subset", "matchingMode": "Video Sequential"},
+    ]
+    results: list[dict[str, Any]] = []
+    for config in configs:
+        before_ids = {attempt["attemptId"] for attempt in reconstruction_repository.list_attempts(project_id)}
+        try:
+            summary = run_sparse_reconstruction(project_id, config["matchingMode"], config["frameSelectionMode"])
+            attempt = summary.get("latestAttempt")
+        except ReconstructionError as exc:
+            attempts = [attempt for attempt in reconstruction_repository.list_attempts(project_id) if attempt["attemptId"] not in before_ids]
+            attempt = attempts[0] if attempts else None
+            results.append({**_sweep_attempt_result(attempt, str(exc)), **config})
+            continue
+        results.append({**_sweep_attempt_result(attempt), **config})
+
+    _update_best_attempt_marker(project_id)
+    summary = reconstruction_summary(project_id) or {}
+    best_attempt = summary.get("bestAttempt")
+    best_id = best_attempt.get("attemptId") if best_attempt else None
+    for result in results:
+        result["isBestAttempt"] = bool(result.get("attemptId") and result["attemptId"] == best_id)
+    return {
+        "projectId": project_id,
+        "status": "Sweep Complete",
+        "attempts": results,
+        "bestAttempt": best_attempt,
+        "summary": summary,
+    }
 
 
 def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None, frame_selection_mode: str | None = None) -> dict[str, Any]:

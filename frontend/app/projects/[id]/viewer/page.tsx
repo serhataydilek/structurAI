@@ -6,8 +6,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
-import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary, SceneAnalysis } from "@/lib/types";
+import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep } from "@/lib/api";
+import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt } from "@/lib/types";
 import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
 
 export default function ViewerPage() {
@@ -23,6 +23,8 @@ export default function ViewerPage() {
   const [densePointCloud, setDensePointCloud] = useState<PointCloudResponse | null>(null);
   const [sceneAnalysis, setSceneAnalysis] = useState<SceneAnalysis | null>(null);
   const [reconstructing, setReconstructing] = useState(false);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepResults, setSweepResults] = useState<SparseSweepAttempt[]>([]);
   const [denseReconstructing, setDenseReconstructing] = useState(false);
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
@@ -126,6 +128,23 @@ export default function ViewerPage() {
       getProject(params.id).then(setProject).catch(() => undefined);
     } finally {
       setDenseReconstructing(false);
+    }
+  }
+
+  async function onRunSparseSweep() {
+    setSweeping(true);
+    setReconstructionError("");
+    try {
+      const result = await runSparseReconstructionSweep(params.id);
+      setSweepResults(result.attempts);
+      setReconstruction(result.summary);
+      await refreshReconstruction();
+      getProject(params.id).then(setProject).catch(() => undefined);
+    } catch (error) {
+      setReconstructionError(error instanceof Error ? error.message : "Sparse experiment sweep failed");
+      await refreshReconstruction();
+    } finally {
+      setSweeping(false);
     }
   }
 
@@ -294,11 +313,12 @@ export default function ViewerPage() {
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Registered</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registeredImageCount}/{selectedAttempt.extractedFrameCount}</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registeredImageCount}/{selectedAttempt.selectedFrameCount ?? selectedAttempt.extractedFrameCount}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Ratio</p>
                       <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registrationRatioLabel ?? `${Math.round(selectedAttempt.registrationRatio * 100)}%`}</p>
+                      <p className="mt-1 text-xs text-slate-500">{selectedAttempt.sourceFrameCount ?? selectedAttempt.extractedFrameCount} source frames</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Quality</p>
@@ -306,6 +326,49 @@ export default function ViewerPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+            <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
+              This will run multiple COLMAP sparse attempts with different frame selection strategies. It may take several minutes but can improve reconstruction quality.
+              <button
+                type="button"
+                disabled={!colmapAvailable || reconstructing || sweeping}
+                onClick={onRunSparseSweep}
+                className="mt-3 rounded-md border border-amber-300/30 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {sweeping ? "Running Sparse Experiment Sweep..." : "Run Sparse Experiment Sweep"}
+              </button>
+            </div>
+            {sweepResults.length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-md border border-white/10">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-white/[0.04] text-xs text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Matching</th>
+                      <th className="px-3 py-2">Selected</th>
+                      <th className="px-3 py-2">Registered</th>
+                      <th className="px-3 py-2">Ratio</th>
+                      <th className="px-3 py-2">Points</th>
+                      <th className="px-3 py-2">Quality</th>
+                      <th className="px-3 py-2">Best</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10">
+                    {sweepResults.map((attempt, index) => (
+                      <tr key={attempt.attemptId ?? index} className="text-slate-200">
+                        <td className="px-3 py-2">{attempt.frameSelectionMode}</td>
+                        <td className="px-3 py-2">{attempt.matchingMode}</td>
+                        <td className="px-3 py-2">{attempt.selectedFrameCount}</td>
+                        <td className="px-3 py-2">{attempt.registeredImageCount}</td>
+                        <td className="px-3 py-2">{attempt.registrationRatioLabel ?? `${Math.round(attempt.selectedRegistrationRatio * 100)}%`}</td>
+                        <td className="px-3 py-2">{attempt.sparsePointCount}</td>
+                        <td className="px-3 py-2">{attempt.sparseQualityLabel}</td>
+                        <td className="px-3 py-2">{attempt.isBestAttempt ? "Yes" : "No"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             {sparseSceneAvailable && (

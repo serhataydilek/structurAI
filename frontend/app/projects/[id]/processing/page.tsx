@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, startProcessing } from "@/lib/api";
-import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary } from "@/lib/types";
+import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, startProcessing } from "@/lib/api";
+import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, SparseSweepAttempt } from "@/lib/types";
 import { AlertTriangle, Check, Cpu, ImageIcon, Loader2 } from "lucide-react";
 
 export default function ProcessingPage() {
@@ -18,6 +18,8 @@ export default function ProcessingPage() {
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [reconstruction, setReconstruction] = useState<ReconstructionSummary | null>(null);
   const [reconstructing, setReconstructing] = useState(false);
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepResults, setSweepResults] = useState<SparseSweepAttempt[]>([]);
   const [denseReconstructing, setDenseReconstructing] = useState(false);
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
@@ -132,6 +134,22 @@ export default function ProcessingPage() {
       getProject(params.id).then(setProject).catch(() => undefined);
     } finally {
       setReconstructing(false);
+    }
+  }
+
+  async function onRunSparseSweep() {
+    setSweeping(true);
+    setReconstructionError("");
+    try {
+      const result = await runSparseReconstructionSweep(params.id);
+      setSweepResults(result.attempts);
+      setReconstruction(result.summary);
+      getProject(params.id).then(setProject).catch(() => undefined);
+    } catch (error) {
+      setReconstructionError(error instanceof Error ? error.message : "Sparse experiment sweep failed");
+      getReconstructionSummary(params.id).then(setReconstruction).catch(() => undefined);
+    } finally {
+      setSweeping(false);
     }
   }
 
@@ -289,11 +307,22 @@ export default function ProcessingPage() {
               </p>
             </div>
             <button
-              disabled={!hasFrames || !colmapAvailable || reconstructing}
+              disabled={!hasFrames || !colmapAvailable || reconstructing || sweeping}
               onClick={onRunSparseReconstruction}
               className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {reconstructing ? "Running COLMAP..." : "Run Sparse Reconstruction"}
+            </button>
+          </div>
+          <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+            This will run multiple COLMAP sparse attempts with different frame selection strategies. It may take several minutes but can improve reconstruction quality.
+            <button
+              type="button"
+              disabled={!hasFrames || !colmapAvailable || reconstructing || sweeping}
+              onClick={onRunSparseSweep}
+              className="mt-3 block rounded-md border border-amber-300/30 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sweeping ? "Running Sparse Experiment Sweep..." : "Run Sparse Experiment Sweep"}
             </button>
           </div>
 
@@ -387,7 +416,8 @@ export default function ProcessingPage() {
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Registration ratio</p>
-                <p className="mt-2 text-sm font-semibold text-white">{Math.round((reconstruction.registrationRatio ?? 0) * 100)}%</p>
+                <p className="mt-2 text-sm font-semibold text-white">{reconstruction.registrationRatioLabel ?? `${Math.round((reconstruction.registrationRatio ?? 0) * 100)}%`}</p>
+                <p className="mt-1 text-xs text-slate-500">{reconstruction.sourceFrameCount ?? reconstruction.extractedFrameCount ?? 0} source frames</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Sparse quality</p>
@@ -461,7 +491,7 @@ export default function ProcessingPage() {
                       <span className="text-xs">{attempt.isBestAttempt ? "Best attempt" : attempt.status}</span>
                     </div>
                     <p className="mt-1 text-xs text-slate-400">
-                      {attempt.frameSelectionMode ?? "All frames"} · {attempt.selectedFrameCount ?? attempt.extractedFrameCount} selected from {attempt.sourceFrameCount ?? attempt.extractedFrameCount} frames · {attempt.registeredImageCount} registered · {attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`} · {attempt.sparsePointCount} points · {attempt.sparseQualityLabel}
+                      {attempt.frameSelectionMode ?? "All frames"} | {attempt.selectedFrameCount ?? attempt.extractedFrameCount} selected from {attempt.sourceFrameCount ?? attempt.extractedFrameCount} source frames | {attempt.registeredImageCount} registered | {attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`} | {attempt.sparsePointCount} points | {attempt.sparseQualityLabel}
                     </p>
                     {attempt.failureReason && <p className="mt-1 text-xs text-red-100/80">{attempt.failureReason}</p>}
                   </div>
@@ -469,9 +499,41 @@ export default function ProcessingPage() {
               </div>
             </div>
           )}
+          {sweepResults.length > 0 && (
+            <div className="mt-5 overflow-hidden rounded-md border border-white/10">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-white/[0.04] text-xs text-slate-400">
+                  <tr>
+                    <th className="px-3 py-2">Mode</th>
+                    <th className="px-3 py-2">Matching</th>
+                    <th className="px-3 py-2">Selected</th>
+                    <th className="px-3 py-2">Registered</th>
+                    <th className="px-3 py-2">Ratio</th>
+                    <th className="px-3 py-2">Points</th>
+                    <th className="px-3 py-2">Quality</th>
+                    <th className="px-3 py-2">Best</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {sweepResults.map((attempt, index) => (
+                    <tr key={attempt.attemptId ?? index} className="text-slate-200">
+                      <td className="px-3 py-2">{attempt.frameSelectionMode}</td>
+                      <td className="px-3 py-2">{attempt.matchingMode}</td>
+                      <td className="px-3 py-2">{attempt.selectedFrameCount}</td>
+                      <td className="px-3 py-2">{attempt.registeredImageCount}</td>
+                      <td className="px-3 py-2">{attempt.registrationRatioLabel ?? `${Math.round(attempt.selectedRegistrationRatio * 100)}%`}</td>
+                      <td className="px-3 py-2">{attempt.sparsePointCount}</td>
+                      <td className="px-3 py-2">{attempt.sparseQualityLabel}</td>
+                      <td className="px-3 py-2">{attempt.isBestAttempt ? "Yes" : "No"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           {sparseQualityPoor && (reconstruction?.registeredImageCount ?? 0) > 0 && (
             <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-              Only {reconstruction?.registeredImageCount ?? 0} out of {reconstruction?.extractedFrameCount ?? reconstruction?.inputFrameCount ?? 0} frames were registered by COLMAP. This means most frames could not be matched reliably.
+              Only {reconstruction?.registeredImageCount ?? 0} out of {reconstruction?.selectedFrameCount ?? reconstruction?.extractedFrameCount ?? reconstruction?.inputFrameCount ?? 0} selected frames were registered by COLMAP. This means most frames could not be matched reliably.
             </div>
           )}
           {(reconstruction?.warnings ?? []).length > 0 && (

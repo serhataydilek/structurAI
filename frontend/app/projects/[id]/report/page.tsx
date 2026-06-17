@@ -135,6 +135,7 @@ export default function ReportPage() {
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Registration ratio</p>
                 <p className="mt-2 text-2xl font-semibold text-white">{report?.reconstructionMetadata?.registrationRatioLabel ?? "0%"}</p>
+                <p className="mt-1 text-xs text-slate-500">{report?.reconstructionMetadata?.sourceFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0} source frames</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Sparse quality</p>
@@ -193,6 +194,36 @@ export default function ReportPage() {
                     Latest run is worse than the best stored attempt: {latestAttempt.label}. The report uses the best attempt by default.
                   </p>
                 )}
+              </div>
+            )}
+            {(report?.reconstructionMetadata?.reconstructionAttempts ?? []).length > 0 && (
+              <div className="mt-4 overflow-hidden rounded-md border border-white/10">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-white/[0.04] text-xs text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Matching</th>
+                      <th className="px-3 py-2">Selected</th>
+                      <th className="px-3 py-2">Registered</th>
+                      <th className="px-3 py-2">Ratio</th>
+                      <th className="px-3 py-2">Points</th>
+                      <th className="px-3 py-2">Best</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10">
+                    {(report?.reconstructionMetadata?.reconstructionAttempts ?? []).map((attempt) => (
+                      <tr key={attempt.attemptId} className="text-slate-200">
+                        <td className="px-3 py-2">{attempt.frameSelectionMode ?? "All frames"}</td>
+                        <td className="px-3 py-2">{attempt.matchingMode}</td>
+                        <td className="px-3 py-2">{attempt.selectedFrameCount ?? attempt.extractedFrameCount}</td>
+                        <td className="px-3 py-2">{attempt.registeredImageCount}</td>
+                        <td className="px-3 py-2">{attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`}</td>
+                        <td className="px-3 py-2">{attempt.sparsePointCount}</td>
+                        <td className="px-3 py-2">{attempt.isBestAttempt ? "Yes" : "No"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             {(report?.reconstructionMetadata?.lowRegistrationRecommendations ?? []).length > 0 && (

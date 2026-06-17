@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -88,6 +88,12 @@ export function runSparseReconstruction(projectId: string, options?: { matchingM
   return request<ReconstructionSummary>(`/projects/${projectId}/reconstruct/sparse`, {
     method: "POST",
     body: JSON.stringify({ matchingMode: options?.matchingMode ?? "Auto", frameSelectionMode: options?.frameSelectionMode ?? "Balanced subset" })
+  });
+}
+
+export function runSparseReconstructionSweep(projectId: string) {
+  return request<SparseSweepResponse>(`/projects/${projectId}/reconstruct/sparse/sweep`, {
+    method: "POST"
   });
 }
 

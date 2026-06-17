@@ -195,6 +195,14 @@ Frame selection modes:
 
 Frame selection matters because more frames are not always better for COLMAP. Many blurry, redundant, or weakly matched frames can make feature matching worse than a smaller, cleaner input set.
 
+Sparse experiment sweep:
+
+- Start with a normal `Balanced subset` sparse reconstruction.
+- If the output is weak, run `Sparse Experiment Sweep` from the processing or viewer page.
+- The sweep runs several controlled sparse attempts without deleting prior attempts: Balanced subset + Video Sequential, Sharpest subset + Video Sequential, and Evenly spaced subset + Video Sequential.
+- Structura keeps all attempts and continues using the best-scoring sparse attempt by default.
+- Registration ratio is reported against selected frames first, for example `44/120 selected frames registered`; source-frame count is shown separately because the reconstruction did not use every extracted frame.
+
 How to improve sparse reconstruction quality:
 
 - Use Detailed 3 FPS for video captures with fast camera motion or thin point clouds.
