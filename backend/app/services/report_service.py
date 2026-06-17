@@ -9,8 +9,8 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
     mode = summary["currentBestViewerMode"] if summary else "prototype_preview"
     if mode == "dense_point_cloud":
         return "Dense point cloud preview"
-    if mode == "sparse_point_cloud":
-        return "Sparse point cloud preview"
+    if summary and summary.get("sparsePointCloudAvailable"):
+        return "Sparse scene preview"
     return "Prototype digital twin preview"
 
 
@@ -22,13 +22,22 @@ def _limitations(summary: dict[str, Any] | None) -> list[str]:
         ]
     if summary and summary.get("sparsePointCloudAvailable"):
         return [
-            "Sparse reconstruction is enabled and has generated matched 3D feature points. Dense reconstruction and mesh generation are the next steps.",
+            "Sparse reconstruction is enabled and has generated matched 3D feature points. The preview combines sparse COLMAP points with estimated room bounds.",
+            "Room bounds and floor level are estimated from sparse features, not measured geometry or a generated mesh.",
             "Measurements are approximate in this prototype.",
         ]
     return [
         "No reconstructed point cloud is available yet. The viewer is using a procedural prototype fallback.",
         "Measurements are approximate in this prototype.",
     ]
+
+
+def _report_next_action(summary: dict[str, Any] | None) -> str:
+    if not summary:
+        return "Run sparse reconstruction"
+    if summary.get("sparsePointCloudAvailable") and summary.get("denseReconstructionLikelyAvailable") is False:
+        return "Install CUDA-enabled COLMAP for dense reconstruction or continue with visual preview pipeline"
+    return summary.get("recommendedNextAction") or "Run sparse reconstruction"
 
 
 def build_report(project_id: str) -> dict[str, Any] | None:
@@ -41,6 +50,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     capture = capture_repository.get_capture_metadata(project_id)
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
+    scene_analysis = reconstruction_service.scene_analysis(project_id) if reconstruction_summary and reconstruction_summary.get("sparsePointCloudAvailable") else None
 
     return {
         "projectName": project["name"],
@@ -90,6 +100,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "viewerModeRecommendation": reconstruction_summary["viewerModeRecommendation"] if reconstruction_summary else "prototype_preview",
             "currentBestViewerMode": reconstruction_summary["currentBestViewerMode"] if reconstruction_summary else "prototype_preview",
             "sparseModelFolders": reconstruction_summary["sparseModelFolders"] if reconstruction_summary else [],
+            "sceneAnalysis": scene_analysis,
             "denseLogPreviewSummary": reconstruction_summary["denseLogPreviewSummary"] if reconstruction_summary else {},
             "warnings": reconstruction_summary["warnings"] if reconstruction_summary else [],
             "errorMessage": reconstruction_summary["errorMessage"] if reconstruction_summary else None,
@@ -98,7 +109,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "likelyCauses": reconstruction_summary["likelyCauses"] if reconstruction_summary else [],
             "denseLikelyCauses": reconstruction_summary["denseLikelyCauses"] if reconstruction_summary else [],
             "recommendedFixes": reconstruction_summary["recommendedFixes"] if reconstruction_summary else [],
-            "recommendedNextAction": reconstruction_summary["recommendedNextAction"] if reconstruction_summary else "Run sparse reconstruction",
+            "recommendedNextAction": _report_next_action(reconstruction_summary),
             "nextStep": "Dense reconstruction / point cloud visualization",
         },
         "annotations": annotations,

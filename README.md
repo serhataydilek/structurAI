@@ -119,7 +119,7 @@ Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/point-cloud"
 
 The viewer switches modes automatically:
 
-- `Sparse Reconstruction Preview` when real COLMAP sparse points are available.
+- `Sparse Scene Preview` when real COLMAP sparse points are available.
 - `Prototype Digital Twin Preview` when no sparse output exists.
 
 This is not a dense mesh or full building model. A sparse point cloud shows matched visual features and camera-derived structure from the uploaded capture. Dense reconstruction, mesh generation, and GLB export remain future milestones.
@@ -132,7 +132,36 @@ Phase 2B test flow:
 2. Process capture to extract frames.
 3. Run sparse reconstruction.
 4. Open the viewer.
-5. Verify the viewer shows `Sparse Reconstruction Preview` instead of the procedural preview.
+5. Verify the viewer shows `Sparse Scene Preview` instead of the procedural preview.
+
+## Sparse Scene Preview
+
+Sparse Scene Preview is a readability layer on top of real COLMAP sparse reconstruction output. It keeps the actual sparse feature points, then estimates scene context from those points so the capture is easier to inspect before dense reconstruction or mesh generation is available.
+
+The backend exposes this analysis through:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/scene-analysis"
+```
+
+The response includes:
+
+- sparse point count
+- raw and robust bounding box
+- center and scale used by the viewer
+- estimated floor level from the low percentile of sparse point height
+- estimated room scaffold width, depth, and height
+- best-effort camera path from COLMAP `images.txt` when available
+- confidence label and warnings
+
+Important limitations:
+
+- Sparse points are real reconstruction output.
+- Room bounds and floor are estimated from sparse features, not measured geometry.
+- This is not a generated mesh, textured model, or final digital twin.
+- Dense reconstruction still requires a CUDA-enabled COLMAP build on this machine, or another dense/visual preview pipeline.
+
+Viewer controls let you show or hide sparse points, estimated room bounds, estimated floor, camera path, and the procedural reference grid. The procedural fallback is only used when no sparse reconstruction output exists.
 
 ## Phase 2C: Sparse Reconstruction Quality
 

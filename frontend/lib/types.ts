@@ -146,6 +146,7 @@ export type ReconstructionSummary = {
   viewerModeRecommendation?: ViewerModeRecommendation;
   currentBestViewerMode?: ViewerModeRecommendation;
   sparseModelFolders: string[];
+  sceneAnalysis?: SceneAnalysis | null;
   logFiles?: string[];
   logPreviews?: Record<string, string>;
   logPreviewSummary?: {

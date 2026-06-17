@@ -124,6 +124,11 @@ export default function ReportPage() {
               <p className="text-xs text-slate-500">Matching mode used</p>
               <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.matchingModeUsed ?? "Not Started"}</p>
             </div>
+            {report?.detectedOutput === "Sparse scene preview" && (
+              <div className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-4 text-sm text-cyan-50">
+                The preview combines sparse COLMAP points with estimated room bounds. It is a readability layer before dense reconstruction or mesh generation, not a final digital twin.
+              </div>
+            )}
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">COLMAP detected</p>
