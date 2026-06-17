@@ -12,7 +12,17 @@ def _row_to_project(row: Any) -> dict[str, Any]:
 def list_projects() -> list[dict[str, Any]]:
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT * FROM projects ORDER BY created_at DESC"
+            """
+            SELECT
+                projects.*,
+                COUNT(media.id) AS mediaCount,
+                capture_metadata.extracted_frame_count AS extractedFrameCount
+            FROM projects
+            LEFT JOIN media ON media.project_id = projects.id
+            LEFT JOIN capture_metadata ON capture_metadata.project_id = projects.id
+            GROUP BY projects.id
+            ORDER BY projects.created_at DESC
+            """
         ).fetchall()
     return [_row_to_project(row) for row in rows]
 
@@ -58,7 +68,37 @@ def set_processing(project_id: str) -> dict[str, Any] | None:
     return get_project(project_id)
 
 
+def set_media_uploaded(project_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        conn.execute("UPDATE projects SET status = ? WHERE id = ? AND status = ?", ("Media Uploaded", project_id, "Draft"))
+    return get_project(project_id)
+
+
 def set_ready(project_id: str) -> dict[str, Any] | None:
     with get_connection() as conn:
         conn.execute("UPDATE projects SET status = ? WHERE id = ?", ("Ready", project_id))
     return get_project(project_id)
+
+
+def set_status(project_id: str, status: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        conn.execute("UPDATE projects SET status = ? WHERE id = ?", (status, project_id))
+    return get_project(project_id)
+
+
+def delete_project(project_id: str) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM capture_metadata WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM reconstruction_metadata WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM annotations WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM media WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+
+def reset_all_projects() -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM capture_metadata")
+        conn.execute("DELETE FROM reconstruction_metadata")
+        conn.execute("DELETE FROM annotations")
+        conn.execute("DELETE FROM media")
+        conn.execute("DELETE FROM projects")

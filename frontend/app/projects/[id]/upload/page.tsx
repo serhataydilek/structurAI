@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { getProject, startProcessing, uploadMedia } from "@/lib/api";
-import type { Project } from "@/lib/types";
+import type { ExtractionFpsMode, Project } from "@/lib/types";
 import { CheckCircle2, UploadCloud } from "lucide-react";
 
 const guidance = [
@@ -17,11 +17,18 @@ const guidance = [
   "Capture from multiple angles"
 ];
 
+const fpsOptions: { mode: ExtractionFpsMode; label: string; description: string }[] = [
+  { mode: "Fast", label: "Fast 1 FPS", description: "Faster processing for quick checks." },
+  { mode: "Balanced", label: "Balanced 2 FPS", description: "Recommended default for room captures." },
+  { mode: "Detailed", label: "Detailed 3 FPS", description: "More frames for COLMAP, longer processing." }
+];
+
 export default function UploadPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const [extractionFpsMode, setExtractionFpsMode] = useState<ExtractionFpsMode>("Balanced");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
 
@@ -54,7 +61,7 @@ export default function UploadPage() {
     setError("");
     try {
       await uploadMedia(params.id, files);
-      await startProcessing(params.id);
+      await startProcessing(params.id, { extractionFpsMode });
       router.push(`/projects/${params.id}/processing`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -70,7 +77,7 @@ export default function UploadPage() {
           <p className="text-sm text-brand">Upload Capture Media</p>
           <h1 className="mt-2 text-3xl font-semibold text-white">{project?.name ?? "Scan project"}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-            Add overlapping photos or a single walkthrough video. This prototype stores media locally and simulates reconstruction.
+            Add overlapping photos or a single walkthrough video. This build stores media locally and prepares real frames for a later reconstruction stage.
           </p>
 
           <div className="glass-panel mt-8 rounded-lg p-6">
@@ -99,6 +106,29 @@ export default function UploadPage() {
             )}
 
             {error && <p className="mt-4 rounded-md border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-100">{error}</p>}
+
+            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Video extraction FPS</p>
+              <p className="mt-1 text-xs text-slate-400">Higher FPS gives COLMAP more frames but takes longer.</p>
+              <div className="mt-3 grid gap-2 md:grid-cols-3">
+                {fpsOptions.map((option) => (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    onClick={() => setExtractionFpsMode(option.mode)}
+                    className={`rounded-md border px-3 py-3 text-left text-sm transition ${
+                      extractionFpsMode === option.mode
+                        ? "border-brand bg-brand/10 text-white"
+                        : "border-white/10 bg-slate-950/50 text-slate-300 hover:bg-white/10"
+                    }`}
+                  >
+                    <span className="font-semibold">{option.label}</span>
+                    {option.mode === "Balanced" && <span className="ml-2 text-xs text-brand">Recommended</span>}
+                    <span className="mt-1 block text-xs text-slate-500">{option.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="mt-6 flex flex-wrap gap-3">
               <button disabled={uploading} onClick={submitUpload} className="rounded-md bg-brand px-5 py-3 font-semibold text-ink hover:bg-cyan-200 disabled:opacity-60">

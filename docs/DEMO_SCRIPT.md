@@ -10,10 +10,10 @@ I will start on the landing page, then create a new scan project. The project fo
 
 Next, I upload scan media. The upload screen supports multiple images and an optional single video, and it includes capture guidance such as moving slowly, keeping 60-80% overlap, capturing corners, avoiding mirrors and glass, using good lighting, and capturing from multiple angles.
 
-After upload, Structura AI runs a simulated processing pipeline: upload received, extracting frames, estimating camera positions, generating point cloud, building 3D model, and exporting the digital twin. The backend tracks deterministic progress and marks the project ready.
+After upload, Structura AI runs the first real capture-processing milestone: upload received, extracting frames, preparing the reconstruction workspace, capture analysis complete, and ready for reconstruction. Image uploads are normalized into frames, and videos use FFmpeg to extract one frame per second.
 
-Once ready, I open the interactive 3D viewer. The current prototype shows a procedural digital twin preview when no generated GLB exists. The viewer includes orbit controls, lighting, project metadata, and inspection annotations. I can add a manual note and store it through the backend.
+Once ready, I can review the capture summary and frame thumbnails, then open the interactive viewer. The current prototype shows a procedural digital twin preview when no generated GLB exists; it is not claiming that a reconstructed model was generated yet. The viewer includes orbit controls, lighting, project metadata, and inspection annotations. I can add a manual note and store it through the backend.
 
-Finally, I generate the report. It summarizes the project name, uploaded media count, processing status, detected output, annotations, and prototype limitations. The important limitation is that measurements are approximate today, and real reconstruction will come later through FFmpeg, COLMAP, OpenMVS, and Blender CLI.
+Finally, I generate the report. It summarizes the project name, uploaded media count, extracted frame count, processing status, annotations, warnings, and prototype limitations. The important limitation is that measurements are approximate today, and 3D reconstruction will come later through COLMAP, OpenMVS, and Blender CLI.
 
 The key takeaway is that this MVP demonstrates the end-to-end product workflow now, while keeping the backend and UI ready for real reconstruction stages in future phases.

@@ -1,4 +1,4 @@
-import type { Annotation, ProcessingStatus, Project, Report } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -14,7 +14,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail ?? "Request failed");
+    const detail = error.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.summary?.denseLastError ?? detail?.summary?.denseErrorMessage ?? detail?.summary?.errorMessage ?? detail?.message ?? response.statusText;
+    throw new Error(message ?? "Request failed");
   }
 
   return response.json() as Promise<T>;
@@ -26,6 +31,22 @@ export function listProjects() {
 
 export function getProject(projectId: string) {
   return request<Project>(`/projects/${projectId}`);
+}
+
+export function getDiagnostics() {
+  return request<Diagnostics>("/diagnostics");
+}
+
+export function deleteProject(projectId: string) {
+  return request<{ status: string; projectId: string }>(`/projects/${projectId}`, {
+    method: "DELETE"
+  });
+}
+
+export function resetDevData() {
+  return request<{ status: string }>("/dev/reset", {
+    method: "POST"
+  });
 }
 
 export function createProject(payload: { name: string; siteType: string; description: string }) {
@@ -44,12 +65,48 @@ export function uploadMedia(projectId: string, files: File[]) {
   });
 }
 
-export function startProcessing(projectId: string) {
-  return request<ProcessingStatus>(`/projects/${projectId}/process`, { method: "POST" });
+export function startProcessing(projectId: string, options?: { extractionFpsMode?: ExtractionFpsMode }) {
+  return request<ProcessingStatus>(`/projects/${projectId}/process`, {
+    method: "POST",
+    body: JSON.stringify({ extractionFpsMode: options?.extractionFpsMode ?? "Balanced" })
+  });
 }
 
 export function getProcessingStatus(projectId: string) {
   return request<ProcessingStatus>(`/projects/${projectId}/status`);
+}
+
+export function getFrames(projectId: string) {
+  return request<FramePreview[]>(`/projects/${projectId}/frames`);
+}
+
+export function getCaptureSummary(projectId: string) {
+  return request<CaptureSummary>(`/projects/${projectId}/capture-summary`);
+}
+
+export function runSparseReconstruction(projectId: string, options?: { matchingMode?: ReconstructionMatchingMode }) {
+  return request<ReconstructionSummary>(`/projects/${projectId}/reconstruct/sparse`, {
+    method: "POST",
+    body: JSON.stringify({ matchingMode: options?.matchingMode ?? "Auto" })
+  });
+}
+
+export function runDenseReconstruction(projectId: string) {
+  return request<ReconstructionSummary>(`/projects/${projectId}/reconstruct/dense`, {
+    method: "POST"
+  });
+}
+
+export function getReconstructionSummary(projectId: string) {
+  return request<ReconstructionSummary>(`/projects/${projectId}/reconstruction-summary`);
+}
+
+export function getPointCloud(projectId: string, maxPoints = 50000) {
+  return request<PointCloudResponse>(`/projects/${projectId}/point-cloud?max_points=${maxPoints}`);
+}
+
+export function getDensePointCloud(projectId: string, maxPoints = 100000) {
+  return request<PointCloudResponse>(`/projects/${projectId}/dense-point-cloud?max_points=${maxPoints}`);
 }
 
 export function getModel(projectId: string) {
