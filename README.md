@@ -336,6 +336,14 @@ Suggested screenshots:
 - Measurements are approximate in this prototype.
 - Mesh generation and GLB export are not yet enabled in this build.
 
+## Sparse Building Demo Notes
+
+The COLMAP South Building photo-set dataset is a strong exterior/building validation case for the current sparse pipeline. A successful local run used `Photo Exhaustive` matching with `All frames` and registered `128/128` images, producing about `85k` sparse points.
+
+For building or exterior sparse previews, use the viewer's `Exterior / building scan` mode and save the orientation once the point cloud is aligned. The saved orientation becomes the default for that attempt, and the report notes that the viewer orientation was manually aligned.
+
+Use `Presentation mode` when capturing demos or screenshots. It hides grid, camera path, axes, and debug helpers so the sparse building point cloud is the main focus. This is still a sparse point cloud preview, not a dense mesh or scaled digital twin.
+
 ## API Validation Commands
 
 Run these from PowerShell after the backend is running.

@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any
 
 from app.repositories import annotation_repository, capture_repository, media_repository, project_repository, reconstruction_repository
+from app.database import get_connection
 from app.services import reconstruction_service
 from app.services.processing_service import readiness_label
 
@@ -74,6 +78,140 @@ def _report_next_action(summary: dict[str, Any] | None) -> str:
     return summary.get("recommendedNextAction") or "Run sparse reconstruction"
 
 
+def _attempt_display_status(attempt: dict[str, Any]) -> str:
+    status = str(attempt.get("status") or "")
+    if "Failed" in status:
+        return "Failed"
+    if int(attempt.get("registeredImageCount") or 0) <= 0 or int(attempt.get("sparsePointCount") or 0) <= 0:
+        return "No points"
+    return "Complete"
+
+
+def _with_attempt_display_status(attempt: dict[str, Any]) -> dict[str, Any]:
+    item = dict(attempt)
+    item["attemptDisplayStatus"] = _attempt_display_status(item)
+    return item
+
+
+def _split_attempts(attempts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    successful: list[dict[str, Any]] = []
+    failed_or_empty: list[dict[str, Any]] = []
+    for attempt in attempts:
+        item = _with_attempt_display_status(attempt)
+        if item["attemptDisplayStatus"] == "Complete":
+            successful.append(item)
+        else:
+            failed_or_empty.append(item)
+    return successful, failed_or_empty
+
+
+def _viewer_orientation_aligned(attempt: dict[str, Any] | None) -> bool:
+    if not attempt:
+        return False
+    transform = attempt.get("viewerTransform") or {}
+    return any([
+        int(transform.get("rotationX") or 0) % 360 != 0,
+        int(transform.get("rotationY") or 0) % 360 != 0,
+        int(transform.get("rotationZ") or 0) % 360 != 0,
+        bool(transform.get("flipX")),
+        bool(transform.get("flipY")),
+        bool(transform.get("flipZ")),
+        float(transform.get("scale") or 1) != 1,
+        float(transform.get("offsetX") or 0) != 0,
+        float(transform.get("offsetY") or 0) != 0,
+        float(transform.get("offsetZ") or 0) != 0,
+    ])
+
+
+def _summary_scene_analysis(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not summary:
+        return None
+    attempt = summary.get("displayedAttempt") or summary.get("bestAttempt") or summary.get("latestAttempt")
+    scene = (attempt or {}).get("sceneAnalysisSummary") or {}
+    return scene if scene else None
+
+
+def _cache_key(
+    project: dict[str, Any],
+    capture: dict[str, Any] | None,
+    annotations: list[dict[str, Any]],
+    reconstruction_summary: dict[str, Any] | None,
+    media_count: int,
+) -> str:
+    attempts = reconstruction_summary.get("reconstructionAttempts", []) if reconstruction_summary else []
+    payload = {
+        "project": {
+            "id": project.get("id"),
+            "name": project.get("name"),
+            "siteType": project.get("site_type"),
+            "description": project.get("description"),
+            "scanType": project.get("scan_type"),
+            "status": project.get("status"),
+            "processingStartedAt": project.get("processing_started_at"),
+        },
+        "capture": capture,
+        "mediaCount": media_count,
+        "annotations": [
+            {"id": item.get("id"), "text": item.get("text"), "createdAt": item.get("created_at")}
+            for item in annotations
+        ],
+        "reconstruction": {
+            "status": (reconstruction_summary or {}).get("status"),
+            "sparseStatus": (reconstruction_summary or {}).get("sparseStatus"),
+            "denseStatus": (reconstruction_summary or {}).get("denseStatus"),
+            "bestAttemptId": ((reconstruction_summary or {}).get("bestAttempt") or {}).get("attemptId"),
+            "latestAttemptId": ((reconstruction_summary or {}).get("latestAttempt") or {}).get("attemptId"),
+            "displayedAttemptId": ((reconstruction_summary or {}).get("displayedAttempt") or {}).get("attemptId"),
+            "attempts": [
+                {
+                    "attemptId": item.get("attemptId"),
+                    "status": item.get("status"),
+                    "registered": item.get("registeredImageCount"),
+                    "selected": item.get("selectedFrameCount"),
+                    "source": item.get("sourceFrameCount"),
+                    "points": item.get("sparsePointCount"),
+                    "quality": item.get("sparseQualityLabel"),
+                    "isBest": item.get("isBestAttempt"),
+                    "viewerTransform": item.get("viewerTransform"),
+                    "viewerPreviewMode": item.get("viewerPreviewMode"),
+                    "sceneAnalysisSummary": item.get("sceneAnalysisSummary"),
+                }
+                for item in attempts
+            ],
+            "denseLogs": (reconstruction_summary or {}).get("denseLogPreviewSummary"),
+            "denseError": (reconstruction_summary or {}).get("denseErrorMessage"),
+        },
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _get_cached_report(project_id: str, cache_key: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT report_json FROM report_cache WHERE project_id = ? AND cache_key = ?",
+            (project_id, cache_key),
+        ).fetchone()
+    if not row:
+        return None
+    return json.loads(row["report_json"])
+
+
+def _store_cached_report(project_id: str, cache_key: str, report: dict[str, Any]) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO report_cache (project_id, cache_key, report_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(project_id) DO UPDATE SET
+                cache_key = excluded.cache_key,
+                report_json = excluded.report_json,
+                updated_at = excluded.updated_at
+            """,
+            (project_id, cache_key, json.dumps(report), now, now),
+        )
+
+
 def build_report(project_id: str) -> dict[str, Any] | None:
     project = project_repository.get_project(project_id)
     if not project:
@@ -84,10 +222,19 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     capture = capture_repository.get_capture_metadata(project_id)
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
-    scene_analysis = reconstruction_service.scene_analysis(project_id) if reconstruction_summary and reconstruction_summary.get("sparsePointCloudAvailable") else None
-    preview_mode = _preview_mode(project, capture, reconstruction_summary)
+    cache_key = _cache_key(project, capture, annotations, reconstruction_summary, len(media))
+    cached = _get_cached_report(project_id, cache_key)
+    if cached:
+        cached["reportCacheStatus"] = "hit"
+        return cached
 
-    return {
+    scene_analysis = _summary_scene_analysis(reconstruction_summary)
+    preview_mode = _preview_mode(project, capture, reconstruction_summary)
+    attempts = reconstruction_summary["reconstructionAttempts"] if reconstruction_summary else []
+    successful_attempts, failed_or_empty_attempts = _split_attempts(attempts)
+    best_attempt = reconstruction_summary["bestAttempt"] if reconstruction_summary else None
+    displayed_attempt = reconstruction_summary["displayedAttempt"] if reconstruction_summary else None
+    report: dict[str, Any] = {
         "projectName": project["name"],
         "projectId": project_id,
         "uploadedMediaCount": len(media),
@@ -138,10 +285,13 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "selectedFrameFolder": reconstruction_summary["selectedFrameFolder"] if reconstruction_summary else None,
             "sparseQualityLabel": reconstruction_summary["sparseQualityLabel"] if reconstruction_summary else "Not evaluated",
             "sparseReconstructionQuality": reconstruction_summary["sparseReconstructionQuality"] if reconstruction_summary else "Not evaluated",
-            "reconstructionAttempts": reconstruction_summary["reconstructionAttempts"] if reconstruction_summary else [],
-            "bestAttempt": reconstruction_summary["bestAttempt"] if reconstruction_summary else None,
+            "reconstructionAttempts": [_with_attempt_display_status(attempt) for attempt in attempts],
+            "successfulAttempts": successful_attempts,
+            "failedOrEmptyAttempts": failed_or_empty_attempts,
+            "hiddenFailedAttemptCount": len(failed_or_empty_attempts),
+            "bestAttempt": best_attempt,
             "latestAttempt": reconstruction_summary["latestAttempt"] if reconstruction_summary else None,
-            "displayedAttempt": reconstruction_summary["displayedAttempt"] if reconstruction_summary else None,
+            "displayedAttempt": displayed_attempt,
             "displayedAttemptRole": reconstruction_summary["displayedAttemptRole"] if reconstruction_summary else None,
             "denseReadiness": reconstruction_summary["denseReadiness"] if reconstruction_summary else {"ready": False, "recommended": False, "reasons": ["sparse reconstruction is not complete"]},
             "densePointCount": reconstruction_summary["densePointCount"] if reconstruction_summary else 0,
@@ -153,6 +303,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "viewerModeRecommendation": reconstruction_summary["viewerModeRecommendation"] if reconstruction_summary else "prototype_preview",
             "currentBestViewerMode": reconstruction_summary["currentBestViewerMode"] if reconstruction_summary else "prototype_preview",
             "previewMode": preview_mode,
+            "viewerOrientationAlignedManually": _viewer_orientation_aligned(displayed_attempt or best_attempt),
             "sparseModelFolders": reconstruction_summary["sparseModelFolders"] if reconstruction_summary else [],
             "sceneAnalysis": scene_analysis,
             "denseLogPreviewSummary": reconstruction_summary["denseLogPreviewSummary"] if reconstruction_summary else {},
@@ -170,3 +321,6 @@ def build_report(project_id: str) -> dict[str, Any] | None:
         "annotations": annotations,
         "limitations": _limitations(reconstruction_summary, preview_mode),
     }
+    _store_cached_report(project_id, cache_key, report)
+    report["reportCacheStatus"] = "miss"
+    return report

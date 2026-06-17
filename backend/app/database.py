@@ -141,6 +141,15 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS report_cache (
+                project_id TEXT PRIMARY KEY,
+                cache_key TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")

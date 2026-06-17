@@ -11,11 +11,14 @@ import { AlertTriangle, ArrowLeft, CheckCircle2 } from "lucide-react";
 export default function ReportPage() {
   const params = useParams<{ id: string }>();
   const [report, setReport] = useState<Report | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const denseLogEntries = Object.entries(report?.reconstructionMetadata?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
   const bestAttempt = report?.reconstructionMetadata?.bestAttempt;
   const latestAttempt = report?.reconstructionMetadata?.latestAttempt;
   const latestDiffersFromBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
   const reportAttempts = report?.reconstructionMetadata?.reconstructionAttempts ?? [];
+  const successfulAttempts = report?.reconstructionMetadata?.successfulAttempts ?? reportAttempts.filter((attempt) => attempt.status === "Sparse Reconstruction Complete" && attempt.registeredImageCount > 0 && attempt.sparsePointCount > 0);
+  const failedOrEmptyAttempts = report?.reconstructionMetadata?.failedOrEmptyAttempts ?? reportAttempts.filter((attempt) => !successfulAttempts.some((successful) => successful.attemptId === attempt.attemptId));
   const reportSparseFinished = report?.reconstructionMetadata?.sparseStatus === "Sparse Reconstruction Complete" || report?.reconstructionMetadata?.sparseStatus === "Sparse Reconstruction Failed";
   const sparseQualityPoor = Boolean(reportAttempts.length > 0 && reportSparseFinished && report?.reconstructionMetadata?.sparseQualityLabel === "Poor Sparse Reconstruction");
   const selectedFrameCount = report?.reconstructionMetadata?.selectedFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0;
@@ -31,8 +34,54 @@ export default function ReportPage() {
   ];
 
   useEffect(() => {
-    getReport(params.id).then(setReport).catch(() => setReport(null));
+    const cacheKey = `structura-report-${params.id}`;
+    const cached = window.sessionStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        setReport(JSON.parse(cached) as Report);
+      } catch {
+        window.sessionStorage.removeItem(cacheKey);
+      }
+    }
+    setRefreshing(true);
+    getReport(params.id)
+      .then((next) => {
+        setReport(next);
+        window.sessionStorage.setItem(cacheKey, JSON.stringify(next));
+      })
+      .catch(() => {
+        if (!cached) setReport(null);
+      })
+      .finally(() => setRefreshing(false));
   }, [params.id]);
+
+  function attemptStatus(attempt: { status: string; registeredImageCount?: number; sparsePointCount?: number; attemptDisplayStatus?: string }) {
+    if (attempt.attemptDisplayStatus) return attempt.attemptDisplayStatus;
+    if (attempt.status.includes("Failed")) return "Failed";
+    if ((attempt.registeredImageCount ?? 0) <= 0 || (attempt.sparsePointCount ?? 0) <= 0) return "No points";
+    return "Complete";
+  }
+
+  if (!report) {
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-4xl">
+          <Link href={`/projects/${params.id}/viewer`} className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white">
+            <ArrowLeft size={16} /> Back to viewer
+          </Link>
+          <div className="glass-panel mt-5 rounded-lg p-8">
+            <p className="text-sm text-brand">Preparing scan summary...</p>
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              {[0, 1, 2].map((item) => (
+                <div key={item} className="h-24 animate-pulse rounded-lg border border-white/10 bg-white/[0.04]" />
+              ))}
+            </div>
+            <div className="mt-6 h-48 animate-pulse rounded-lg border border-white/10 bg-white/[0.04]" />
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -47,6 +96,9 @@ export default function ReportPage() {
           <p className="mt-3 text-sm leading-6 text-slate-400">
             Mentor-ready prototype report generated from the local project metadata, uploaded media, processing status, and inspection annotations.
           </p>
+          {refreshing && (
+            <p className="mt-3 text-xs text-slate-500">Refreshing cached scan summary...</p>
+          )}
 
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -174,6 +226,11 @@ export default function ReportPage() {
               <p className="text-xs text-slate-500">Matching mode used</p>
               <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.matchingModeUsed ?? "Not Started"}</p>
             </div>
+            {report?.reconstructionMetadata?.viewerOrientationAlignedManually && (
+              <div className="mt-4 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4 text-sm text-emerald-50">
+                Viewer orientation aligned manually.
+              </div>
+            )}
             {sparseQualityPoor && (
               <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 p-5 text-red-50">
                 <p className="text-base font-semibold">
@@ -247,34 +304,76 @@ export default function ReportPage() {
                 )}
               </div>
             )}
-            {(report?.reconstructionMetadata?.reconstructionAttempts ?? []).length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-md border border-white/10">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-white/[0.04] text-xs text-slate-400">
-                    <tr>
-                      <th className="px-3 py-2">Mode</th>
-                      <th className="px-3 py-2">Matching</th>
-                      <th className="px-3 py-2">Selected</th>
-                      <th className="px-3 py-2">Registered</th>
-                      <th className="px-3 py-2">Ratio</th>
-                      <th className="px-3 py-2">Points</th>
-                      <th className="px-3 py-2">Best</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/10">
-                    {(report?.reconstructionMetadata?.reconstructionAttempts ?? []).map((attempt) => (
-                      <tr key={attempt.attemptId} className="text-slate-200">
-                        <td className="px-3 py-2">{attempt.frameSelectionMode ?? "All frames"}</td>
-                        <td className="px-3 py-2">{attempt.matchingMode}</td>
-                        <td className="px-3 py-2">{attempt.selectedFrameCount ?? attempt.extractedFrameCount}</td>
-                        <td className="px-3 py-2">{attempt.registeredImageCount}</td>
-                        <td className="px-3 py-2">{attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`}</td>
-                        <td className="px-3 py-2">{attempt.sparsePointCount}</td>
-                        <td className="px-3 py-2">{attempt.isBestAttempt ? "Yes" : "No"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {reportAttempts.length > 0 && (
+              <div className="mt-4 space-y-3">
+                {failedOrEmptyAttempts.length > 0 && (
+                  <p className="text-xs text-slate-500">{failedOrEmptyAttempts.length} failed/empty attempt{failedOrEmptyAttempts.length === 1 ? "" : "s"} hidden from the main report table.</p>
+                )}
+                {successfulAttempts.length > 0 && (
+                  <div className="overflow-hidden rounded-md border border-white/10">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-white/[0.04] text-xs text-slate-400">
+                        <tr>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Mode</th>
+                          <th className="px-3 py-2">Matching</th>
+                          <th className="px-3 py-2">Selected</th>
+                          <th className="px-3 py-2">Registered</th>
+                          <th className="px-3 py-2">Ratio</th>
+                          <th className="px-3 py-2">Points</th>
+                          <th className="px-3 py-2">Role</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {successfulAttempts.map((attempt) => (
+                          <tr key={attempt.attemptId} className="text-slate-200">
+                            <td className="px-3 py-2">{attemptStatus(attempt)}</td>
+                            <td className="px-3 py-2">{attempt.frameSelectionMode ?? "All frames"}</td>
+                            <td className="px-3 py-2">{attempt.matchingMode}</td>
+                            <td className="px-3 py-2">{attempt.selectedFrameCount ?? attempt.extractedFrameCount}</td>
+                            <td className="px-3 py-2">{attempt.registeredImageCount}</td>
+                            <td className="px-3 py-2">{attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`}</td>
+                            <td className="px-3 py-2">{attempt.sparsePointCount}</td>
+                            <td className="px-3 py-2">
+                              {attempt.isBestAttempt ? "Best" : latestAttempt?.attemptId === attempt.attemptId ? "Latest" : "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {failedOrEmptyAttempts.length > 0 && (
+                  <details className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-300">Failed or empty attempts</summary>
+                    <div className="mt-3 overflow-hidden rounded-md border border-white/10">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-white/[0.04] text-xs text-slate-400">
+                          <tr>
+                            <th className="px-3 py-2">Status</th>
+                            <th className="px-3 py-2">Mode</th>
+                            <th className="px-3 py-2">Matching</th>
+                            <th className="px-3 py-2">Registered</th>
+                            <th className="px-3 py-2">Points</th>
+                            <th className="px-3 py-2">Role</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/10">
+                          {failedOrEmptyAttempts.map((attempt) => (
+                            <tr key={attempt.attemptId} className="text-slate-300">
+                              <td className="px-3 py-2">{attemptStatus(attempt)}</td>
+                              <td className="px-3 py-2">{attempt.frameSelectionMode ?? "All frames"}</td>
+                              <td className="px-3 py-2">{attempt.matchingMode}</td>
+                              <td className="px-3 py-2">{attempt.registeredImageCount}/{attempt.selectedFrameCount ?? attempt.extractedFrameCount}</td>
+                              <td className="px-3 py-2">{attempt.sparsePointCount}</td>
+                              <td className="px-3 py-2">{attempt.isBestAttempt ? "Best" : latestAttempt?.attemptId === attempt.attemptId ? "Latest" : "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
               </div>
             )}
             {(report?.reconstructionMetadata?.lowRegistrationRecommendations ?? []).length > 0 && (

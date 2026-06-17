@@ -59,6 +59,12 @@ export default function ViewerPage() {
   const [showCameraPath, setShowCameraPath] = useState(true);
   const [showBoundingBox, setShowBoundingBox] = useState(false);
   const [showReference, setShowReference] = useState(true);
+  const [presentationMode, setPresentationMode] = useState(false);
+  const [debugCameraPath, setDebugCameraPath] = useState(false);
+  const [showCameraSpheres, setShowCameraSpheres] = useState(true);
+  const [cameraPathPointSize, setCameraPathPointSize] = useState(0.04);
+  const [cameraPathPointOpacity, setCameraPathPointOpacity] = useState(0.6);
+  const [cameraPathLineOpacity, setCameraPathLineOpacity] = useState(0.45);
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
   const [selectedAttemptId, setSelectedAttemptId] = useState<string>("");
@@ -189,6 +195,8 @@ export default function ViewerPage() {
   const colmapCudaHint = reconstruction?.colmapCudaHint ?? diagnostics?.colmap.colmapCudaHint ?? (colmapAvailable ? "COLMAP detected; CUDA dense-stereo support is unknown." : "COLMAP not detected.");
   const denseLikelyUnavailable = denseLikelyAvailable === false;
   const attempts = reconstruction?.reconstructionAttempts ?? [];
+  const successfulAttempts = reconstruction?.successfulAttempts ?? attempts.filter((attempt) => attempt.status === "Sparse Reconstruction Complete" && (attempt.registeredImageCount ?? 0) > 0 && (attempt.sparsePointCount ?? 0) > 0);
+  const failedOrEmptyAttempts = reconstruction?.failedOrEmptyAttempts ?? attempts.filter((attempt) => !successfulAttempts.some((successful) => successful.attemptId === attempt.attemptId));
   const hasSparseAttempt = attempts.length > 0;
   const sparseFinished = sparseStatus === "Sparse Reconstruction Complete" || sparseStatus === "Sparse Reconstruction Failed";
   const sparseQualityLabel = reconstruction?.sparseQualityLabel ?? "Not evaluated";
@@ -278,16 +286,26 @@ export default function ViewerPage() {
       setShowEstimatedFloor(false);
       setShowRoomBounds(false);
       setShowBoundingBox(true);
-      setShowCameraPath(true);
+      setShowCameraPath(false);
       setShowReference(false);
-      setPointSize("Large");
-      setPointSizeValue(0.065);
+      setDebugCameraPath(false);
+      setShowCameraSpheres(false);
+      setCameraPathPointSize(0.026);
+      setCameraPathPointOpacity(0.35);
+      setCameraPathLineOpacity(0.32);
+      setPointSize("Medium");
+      setPointSizeValue(0.052);
     } else {
       setShowEstimatedFloor(true);
       setShowRoomBounds(true);
       setShowBoundingBox(false);
       setShowCameraPath(true);
       setShowReference(true);
+      setDebugCameraPath(true);
+      setShowCameraSpheres(true);
+      setCameraPathPointSize(0.045);
+      setCameraPathPointOpacity(0.8);
+      setCameraPathLineOpacity(0.75);
       setPointSize("Medium");
       setPointSizeValue(0.045);
     }
@@ -337,6 +355,16 @@ export default function ViewerPage() {
       setSavingViewerTransform(false);
     }
   }
+
+  function attemptStatus(attempt: { status: string; registeredImageCount?: number; sparsePointCount?: number }) {
+    if (attempt.status.includes("Failed")) return "Failed";
+    if ((attempt.registeredImageCount ?? 0) <= 0 || (attempt.sparsePointCount ?? 0) <= 0) return "No points";
+    return "Complete";
+  }
+
+  const renderCameraPath = activePreviewMode === "exterior" ? debugCameraPath && showCameraPath && !presentationMode : showCameraPath && !presentationMode;
+  const renderReference = presentationMode ? false : showReference;
+  const renderBoundingBox = presentationMode ? showBoundingBox : showBoundingBox;
 
   return (
     <AppShell>
@@ -461,7 +489,7 @@ export default function ViewerPage() {
                   <div>
                     <p className="text-sm font-semibold text-white">Reconstruction Attempt</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      Current displayed attempt: {selectedAttempt?.isBestAttempt ? "Best attempt" : "Latest attempt"}
+                      Current displayed attempt: {selectedAttempt?.isBestAttempt ? "Best attempt" : latestAttempt?.attemptId === selectedAttempt?.attemptId ? "Latest attempt" : "Selected attempt"}
                     </p>
                   </div>
                   <select
@@ -471,11 +499,16 @@ export default function ViewerPage() {
                   >
                     {attempts.map((attempt) => (
                       <option key={attempt.attemptId} value={attempt.attemptId}>
-                        {`${attempt.isBestAttempt ? "Best attempt - " : ""}${latestAttempt?.attemptId === attempt.attemptId ? "Latest attempt - " : ""}${attempt.label ?? `${attempt.sparseQualityLabel} - ${attempt.registeredImageCount}/${attempt.extractedFrameCount} registered - ${attempt.sparsePointCount} points`}`}
+                        {`${attempt.isBestAttempt ? "Best attempt - " : ""}${latestAttempt?.attemptId === attempt.attemptId ? "Latest attempt - " : ""}${attemptStatus(attempt)} - ${attempt.label ?? `${attempt.sparseQualityLabel} - ${attempt.registeredImageCount}/${attempt.extractedFrameCount} registered - ${attempt.sparsePointCount} points`}`}
                       </option>
                     ))}
                   </select>
                 </div>
+                {successfulAttempts.length > 0 && (
+                  <p className="mt-3 text-xs text-slate-400">
+                    Showing {successfulAttempts.length} successful attempt{successfulAttempts.length === 1 ? "" : "s"} first. {failedOrEmptyAttempts.length > 0 ? `${failedOrEmptyAttempts.length} failed/empty attempt${failedOrEmptyAttempts.length === 1 ? "" : "s"} kept for debugging.` : ""}
+                  </p>
+                )}
                 {latestWorseThanBest && (
                   <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
                     Latest attempt is worse than the best saved attempt. Viewer is showing the best attempt by default.
@@ -506,9 +539,22 @@ export default function ViewerPage() {
                       <div className="mt-2 flex flex-wrap gap-2">
                         {selectedAttempt.isBestAttempt && <span className="rounded border border-emerald-300/30 px-2 py-0.5 text-xs text-emerald-100">Best attempt</span>}
                         {latestAttempt?.attemptId === selectedAttempt.attemptId && <span className="rounded border border-slate-400/30 px-2 py-0.5 text-xs text-slate-200">Latest attempt</span>}
+                        <span className="rounded border border-white/10 px-2 py-0.5 text-xs text-slate-300">{attemptStatus(selectedAttempt)}</span>
                       </div>
                     </div>
                   </div>
+                )}
+                {failedOrEmptyAttempts.length > 0 && (
+                  <details className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-slate-300">Failed or empty attempts</summary>
+                    <div className="mt-3 space-y-2 text-xs text-slate-400">
+                      {failedOrEmptyAttempts.map((attempt) => (
+                        <div key={attempt.attemptId} className="rounded border border-white/10 bg-slate-950/60 p-2">
+                          <span className="font-semibold text-slate-200">{attemptStatus(attempt)}</span> - {attempt.frameSelectionMode ?? "All frames"} / {attempt.matchingMode}: {attempt.registeredImageCount}/{attempt.selectedFrameCount ?? attempt.extractedFrameCount} registered, {attempt.sparsePointCount} points
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
               </div>
             )}
@@ -804,13 +850,22 @@ export default function ViewerPage() {
                   <p className="text-sm font-semibold text-white">Point cloud readability</p>
                   <p className="mt-1 text-xs text-slate-400">Adjust point rendering and orientation without changing reconstruction data.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setViewerResetKey((current) => current + 1)}
-                  className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10"
-                >
-                  Center point cloud
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPresentationMode((current) => !current)}
+                    className={`rounded-md border px-3 py-2 text-sm font-medium ${presentationMode ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-100 hover:bg-white/10"}`}
+                  >
+                    {presentationMode ? "Exit presentation mode" : "Presentation mode"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewerResetKey((current) => current + 1)}
+                    className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10"
+                  >
+                    Center point cloud
+                  </button>
+                </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 {([
@@ -901,7 +956,7 @@ export default function ViewerPage() {
                 </select>
                 {activePointCloud?.source === "colmap_sparse" && (
                   <>
-                    {([
+                    {([ 
                       ["Sparse points", showSparsePoints, setShowSparsePoints],
                       ...(activePreviewMode === "interior" ? [["Room bounds", showRoomBounds, setShowRoomBounds], ["Estimated floor", showEstimatedFloor, setShowEstimatedFloor]] as const : []),
                       ["Camera path", showCameraPath, setShowCameraPath]
@@ -917,6 +972,36 @@ export default function ViewerPage() {
                         {enabled ? `Hide ${label}` : `Show ${label}`}
                       </button>
                     ))}
+                  </>
+                )}
+                {activePointCloud?.source === "colmap_sparse" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setDebugCameraPath((current) => !current)}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium ${debugCameraPath ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"}`}
+                    >
+                      {debugCameraPath ? "Hide debug camera path" : "Show debug camera path"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCameraSpheres((current) => !current)}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium ${showCameraSpheres ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"}`}
+                    >
+                      {showCameraSpheres ? "Hide camera spheres" : "Show camera spheres"}
+                    </button>
+                    <label className="flex min-w-48 flex-col gap-1 rounded-md border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+                      Camera path size
+                      <input type="range" min="0.01" max="0.09" step="0.002" value={cameraPathPointSize} onChange={(event) => setCameraPathPointSize(Number(event.target.value))} />
+                    </label>
+                    <label className="flex min-w-48 flex-col gap-1 rounded-md border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+                      Camera path opacity
+                      <input type="range" min="0.05" max="1" step="0.05" value={cameraPathPointOpacity} onChange={(event) => setCameraPathPointOpacity(Number(event.target.value))} />
+                    </label>
+                    <label className="flex min-w-48 flex-col gap-1 rounded-md border border-white/10 bg-slate-950/60 px-3 py-2 text-xs text-slate-400">
+                      Camera line opacity
+                      <input type="range" min="0.05" max="1" step="0.05" value={cameraPathLineOpacity} onChange={(event) => setCameraPathLineOpacity(Number(event.target.value))} />
+                    </label>
                   </>
                 )}
                 <button
@@ -948,11 +1033,17 @@ export default function ViewerPage() {
             showSparsePoints={showSparsePoints}
             showRoomBounds={activePreviewMode === "interior" && showRoomBounds}
             showEstimatedFloor={activePreviewMode === "interior" && showEstimatedFloor}
-            showCameraPath={showCameraPath}
-            showBoundingBox={showBoundingBox}
-            showReference={showReference}
+            showCameraPath={renderCameraPath}
+            showBoundingBox={renderBoundingBox}
+            showReference={renderReference}
+            showAxisGizmo={activePreviewMode === "exterior" && debugCameraPath && !presentationMode}
             viewerTransform={viewerTransform}
             previewMode={activePreviewMode}
+            presentationMode={presentationMode}
+            cameraPathPointSize={cameraPathPointSize}
+            cameraPathPointOpacity={cameraPathPointOpacity}
+            cameraPathLineOpacity={cameraPathLineOpacity}
+            showCameraSpheres={showCameraSpheres}
             outputLabel={outputType}
             resetKey={viewerResetKey}
           />

@@ -69,6 +69,7 @@ export type Report = {
   detectedOutput: string;
   captureMetadata?: CaptureSummary;
   reconstructionMetadata?: ReconstructionSummary;
+  reportCacheStatus?: "hit" | "miss";
   warnings?: string[];
   annotations: Annotation[];
   limitations: string[];
@@ -160,6 +161,9 @@ export type ReconstructionSummary = {
   frameSelectionMode?: FrameSelectionMode | string;
   selectedFrameFolder?: string | null;
   reconstructionAttempts?: ReconstructionAttempt[];
+  successfulAttempts?: ReconstructionAttempt[];
+  failedOrEmptyAttempts?: ReconstructionAttempt[];
+  hiddenFailedAttemptCount?: number;
   bestAttempt?: ReconstructionAttempt | null;
   latestAttempt?: ReconstructionAttempt | null;
   displayedAttempt?: ReconstructionAttempt | null;
@@ -185,6 +189,7 @@ export type ReconstructionSummary = {
   currentBestViewerMode?: ViewerModeRecommendation;
   sparseModelFolders: string[];
   sceneAnalysis?: SceneAnalysis | null;
+  viewerOrientationAlignedManually?: boolean;
   logFiles?: string[];
   logPreviews?: Record<string, string>;
   logPreviewSummary?: {
@@ -242,6 +247,7 @@ export type ReconstructionAttempt = {
   viewerPreviewMode?: PreviewMode;
   isBestAttempt: boolean;
   failureReason?: string | null;
+  attemptDisplayStatus?: "Complete" | "Failed" | "No points";
   label?: string;
   source?: string;
 };

@@ -222,12 +222,26 @@ function RoomScaffold({ analysis, viewerTransform, exterior = false }: { analysi
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <lineBasicMaterial color={exterior ? "#94a3b8" : "#67e8f9"} transparent opacity={exterior ? 0.45 : 0.9} />
+      <lineBasicMaterial color={exterior ? "#94a3b8" : "#67e8f9"} transparent opacity={exterior ? 0.24 : 0.9} />
     </lineSegments>
   );
 }
 
-function CameraPath({ analysis, viewerTransform }: { analysis?: SceneAnalysis | null; viewerTransform?: Partial<ViewerTransform> }) {
+function CameraPath({
+  analysis,
+  viewerTransform,
+  pointSize,
+  pointOpacity,
+  lineOpacity,
+  showSpheres
+}: {
+  analysis?: SceneAnalysis | null;
+  viewerTransform?: Partial<ViewerTransform>;
+  pointSize: number;
+  pointOpacity: number;
+  lineOpacity: number;
+  showSpheres: boolean;
+}) {
   const cameras = analysis?.cameraPath.positions ?? [];
   if (!analysis?.available || !analysis.cameraPath.available || cameras.length === 0) return null;
   const transform = sceneTransform(analysis, viewerTransform);
@@ -235,12 +249,12 @@ function CameraPath({ analysis, viewerTransform }: { analysis?: SceneAnalysis | 
 
   return (
     <group>
-      {cameras.map((camera) => {
+      {showSpheres && cameras.map((camera) => {
         const position = transform(camera);
         return (
           <mesh key={`${camera.imageId}-${camera.imageName}`} position={position}>
-            <sphereGeometry args={[0.055, 12, 12]} />
-            <meshStandardMaterial color="#fbbf24" emissive="#78350f" emissiveIntensity={0.25} />
+            <sphereGeometry args={[pointSize, 12, 12]} />
+            <meshStandardMaterial color="#fbbf24" emissive="#78350f" emissiveIntensity={0.12} transparent opacity={pointOpacity} />
           </mesh>
         );
       })}
@@ -249,7 +263,7 @@ function CameraPath({ analysis, viewerTransform }: { analysis?: SceneAnalysis | 
           <bufferGeometry>
             <bufferAttribute attach="attributes-position" args={[pathPositions, 3]} />
           </bufferGeometry>
-          <lineBasicMaterial color="#fbbf24" transparent opacity={0.85} />
+          <lineBasicMaterial color="#fbbf24" transparent opacity={lineOpacity} />
         </line>
       )}
     </group>
@@ -292,8 +306,13 @@ function SceneContent({
   showCameraPath,
   showBoundingBox,
   showReference,
+  showAxisGizmo,
   viewerTransform,
-  previewMode
+  previewMode,
+  cameraPathPointSize,
+  cameraPathPointOpacity,
+  cameraPathLineOpacity,
+  showCameraSpheres
 }: {
   pointCloud?: PointCloudResponse | null;
   sceneAnalysis?: SceneAnalysis | null;
@@ -308,8 +327,13 @@ function SceneContent({
   showCameraPath: boolean;
   showBoundingBox: boolean;
   showReference: boolean;
+  showAxisGizmo: boolean;
   viewerTransform?: Partial<ViewerTransform>;
   previewMode: PreviewMode;
+  cameraPathPointSize: number;
+  cameraPathPointOpacity: number;
+  cameraPathLineOpacity: number;
+  showCameraSpheres: boolean;
 }) {
   const hasPointCloud = Boolean(pointCloud?.available && pointCloud.points.length > 0);
 
@@ -324,8 +348,8 @@ function SceneContent({
           {showEstimatedFloor && <EstimatedFloor analysis={sceneAnalysis} viewerTransform={viewerTransform} />}
           {showRoomBounds && <RoomScaffold analysis={sceneAnalysis} viewerTransform={viewerTransform} />}
           {showBoundingBox && <RoomScaffold analysis={sceneAnalysis} viewerTransform={viewerTransform} exterior={previewMode === "exterior"} />}
-          {showCameraPath && <CameraPath analysis={sceneAnalysis} viewerTransform={viewerTransform} />}
-          {previewMode === "exterior" && <AxisGizmo />}
+          {showCameraPath && <CameraPath analysis={sceneAnalysis} viewerTransform={viewerTransform} pointSize={cameraPathPointSize} pointOpacity={cameraPathPointOpacity} lineOpacity={cameraPathLineOpacity} showSpheres={showCameraSpheres} />}
+          {showAxisGizmo && <AxisGizmo />}
         </>
       )}
       {showReference && (
@@ -351,8 +375,14 @@ export function ViewerScene({
   showCameraPath = true,
   showBoundingBox = false,
   showReference = true,
+  showAxisGizmo = false,
   viewerTransform,
   previewMode = "auto",
+  presentationMode = false,
+  cameraPathPointSize = 0.04,
+  cameraPathPointOpacity = 0.6,
+  cameraPathLineOpacity = 0.45,
+  showCameraSpheres = true,
   outputLabel,
   resetKey = 0
 }: {
@@ -369,8 +399,14 @@ export function ViewerScene({
   showCameraPath?: boolean;
   showBoundingBox?: boolean;
   showReference?: boolean;
+  showAxisGizmo?: boolean;
   viewerTransform?: Partial<ViewerTransform>;
   previewMode?: PreviewMode;
+  presentationMode?: boolean;
+  cameraPathPointSize?: number;
+  cameraPathPointOpacity?: number;
+  cameraPathLineOpacity?: number;
+  showCameraSpheres?: boolean;
   outputLabel?: string;
   resetKey?: number;
 }) {
@@ -389,7 +425,7 @@ export function ViewerScene({
   }
   return (
     <div className="relative h-[540px] overflow-hidden rounded-lg border border-white/10 bg-slate-950 shadow-glow">
-      <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-md border border-brand/25 bg-slate-950/80 px-3 py-2 text-xs font-medium text-cyan-100 backdrop-blur">
+      <div className={`pointer-events-none absolute left-4 top-4 z-10 rounded-md border border-brand/25 bg-slate-950/80 px-3 py-2 text-xs font-medium text-cyan-100 backdrop-blur ${presentationMode ? "border-white/10 bg-slate-950/55 text-slate-100" : ""}`}>
         {outputLabel ?? (hasPointCloud
           ? pointCloud?.source === "colmap_dense"
             ? "Dense point cloud preview"
@@ -415,8 +451,13 @@ export function ViewerScene({
           showCameraPath={showCameraPath}
           showBoundingBox={showBoundingBox}
           showReference={showReference}
+          showAxisGizmo={showAxisGizmo}
           viewerTransform={viewerTransform}
           previewMode={previewMode}
+          cameraPathPointSize={cameraPathPointSize}
+          cameraPathPointOpacity={cameraPathPointOpacity}
+          cameraPathLineOpacity={cameraPathLineOpacity}
+          showCameraSpheres={showCameraSpheres}
         />
       </Canvas>
     </div>
