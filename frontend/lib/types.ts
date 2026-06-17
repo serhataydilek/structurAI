@@ -197,3 +197,56 @@ export type PointCloudResponse = {
   points: PointCloudPoint[];
   message: string;
 };
+
+export type SceneVector = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type SceneAnalysis = {
+  available: boolean;
+  pointCount: number;
+  boundingBox: null | {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+    robustMinX: number;
+    robustMaxX: number;
+    robustMinY: number;
+    robustMaxY: number;
+    robustMinZ: number;
+    robustMaxZ: number;
+  };
+  center: SceneVector | null;
+  scale: number;
+  suggestedCameraTarget?: SceneVector;
+  suggestedCameraDistance?: number;
+  floorEstimate: null | {
+    axis: "y";
+    level: number;
+    method: string;
+  };
+  roomScaffold: null | {
+    width: number;
+    depth: number;
+    height: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+    minZ: number;
+    maxZ: number;
+  };
+  cameraPath: {
+    available: boolean;
+    positions: Array<SceneVector & { imageId: number; imageName: string }>;
+    message: string;
+  };
+  confidence: "Low" | "Medium" | "High";
+  warnings: string[];
+  message: string;
+};

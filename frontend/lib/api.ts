@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -107,6 +107,10 @@ export function getPointCloud(projectId: string, maxPoints = 50000) {
 
 export function getDensePointCloud(projectId: string, maxPoints = 100000) {
   return request<PointCloudResponse>(`/projects/${projectId}/dense-point-cloud?max_points=${maxPoints}`);
+}
+
+export function getSceneAnalysis(projectId: string) {
+  return request<SceneAnalysis>(`/projects/${projectId}/scene-analysis`);
 }
 
 export function getModel(projectId: string) {

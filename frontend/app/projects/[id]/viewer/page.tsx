@@ -6,8 +6,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getModel, getPointCloud, getProject, getReconstructionSummary, listAnnotations, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
-import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary } from "@/lib/types";
+import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getModel, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
+import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary, SceneAnalysis } from "@/lib/types";
 import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
 
 export default function ViewerPage() {
@@ -21,12 +21,17 @@ export default function ViewerPage() {
   const [pointCloud, setPointCloud] = useState<PointCloudResponse | null>(null);
   const [sparsePointCloud, setSparsePointCloud] = useState<PointCloudResponse | null>(null);
   const [densePointCloud, setDensePointCloud] = useState<PointCloudResponse | null>(null);
+  const [sceneAnalysis, setSceneAnalysis] = useState<SceneAnalysis | null>(null);
   const [reconstructing, setReconstructing] = useState(false);
   const [denseReconstructing, setDenseReconstructing] = useState(false);
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
   const [viewerMode, setViewerMode] = useState<"auto" | "dense" | "sparse">("auto");
   const [pointSize, setPointSize] = useState<PointCloudPointSize>("Medium");
+  const [showSparsePoints, setShowSparsePoints] = useState(true);
+  const [showRoomBounds, setShowRoomBounds] = useState(true);
+  const [showEstimatedFloor, setShowEstimatedFloor] = useState(true);
+  const [showCameraPath, setShowCameraPath] = useState(true);
   const [showReference, setShowReference] = useState(true);
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
@@ -53,14 +58,17 @@ export default function ViewerPage() {
       setReconstruction(next);
       let loadedDense: PointCloudResponse | null = null;
       let loadedSparse: PointCloudResponse | null = null;
+      let loadedSceneAnalysis: SceneAnalysis | null = null;
       if (next.densePointCloudAvailable) {
         loadedDense = await getDensePointCloud(params.id).catch(() => null);
       }
       if (next.sparsePointCloudAvailable) {
         loadedSparse = await getPointCloud(params.id).catch(() => null);
+        loadedSceneAnalysis = await getSceneAnalysis(params.id).catch(() => null);
       }
       setDensePointCloud(loadedDense);
       setSparsePointCloud(loadedSparse);
+      setSceneAnalysis(loadedSceneAnalysis);
       setPointCloud(loadedDense?.available ? loadedDense : loadedSparse?.available ? loadedSparse : null);
       return next;
     } catch {
@@ -68,6 +76,7 @@ export default function ViewerPage() {
       setPointCloud(null);
       setSparsePointCloud(null);
       setDensePointCloud(null);
+      setSceneAnalysis(null);
       return null;
     }
   }
@@ -148,14 +157,24 @@ export default function ViewerPage() {
   const hasDensePointCloud = Boolean(densePointCloud?.available && densePointCloud.points.length > 0);
   const hasSparsePointCloud = Boolean(sparsePointCloud?.available && sparsePointCloud.points.length > 0);
   const activePointCloud = selectedPointCloud?.available ? selectedPointCloud : pointCloud;
-  const outputType = activePointCloud?.source === "colmap_dense" ? "Dense point cloud" : activePointCloud?.source === "colmap_sparse" ? "Sparse point cloud" : "Procedural preview";
+  const sparseSceneAvailable = Boolean(sceneAnalysis?.available && activePointCloud?.source === "colmap_sparse");
+  const activeSceneAnalysis = activePointCloud?.source === "colmap_sparse" ? sceneAnalysis : null;
+  const outputType = activePointCloud?.source === "colmap_dense" ? "Dense point cloud" : sparseSceneAvailable ? "Sparse scene preview" : activePointCloud?.source === "colmap_sparse" ? "Sparse point cloud" : "Procedural preview";
   const hasPointCloud = Boolean(activePointCloud?.available && activePointCloud.points.length > 0);
-  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "Prototype Digital Twin Preview";
+  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "Prototype Digital Twin Preview";
   const explanation = activePointCloud?.source === "colmap_dense"
     ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or final digital twin yet."
-    : hasPointCloud
-      ? "This is a real sparse point cloud reconstructed from the uploaded capture. It is not a dense mesh yet."
+    : sparseSceneAvailable
+      ? "This view uses the real COLMAP sparse reconstruction plus estimated room bounds to make the captured space easier to inspect. It is not a dense mesh yet."
+      : hasPointCloud
+        ? "This is a real sparse point cloud reconstructed from the uploaded capture. It is not a dense mesh yet."
     : "This is a procedural prototype preview. Process the capture and run sparse reconstruction to view real reconstruction output.";
+  const room = sceneAnalysis?.roomScaffold;
+  const denseAvailabilityText = denseLikelyUnavailable
+    ? "Dense reconstruction requires a CUDA-enabled COLMAP build on this machine."
+    : denseLikelyAvailable === true
+      ? "Dense reconstruction support appears available."
+      : "Dense reconstruction support is unknown on this machine.";
 
   return (
     <AppShell>
@@ -203,6 +222,44 @@ export default function ViewerPage() {
             <div className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">
               Next action: {reconstruction?.recommendedNextAction ?? "Run sparse reconstruction"}
             </div>
+            {sparseSceneAvailable && (
+              <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-white">Sparse Scene Stats</p>
+                    <p className="mt-1 text-xs text-slate-400">The preview combines sparse COLMAP points with estimated room bounds.</p>
+                  </div>
+                  <span className="rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
+                    {sceneAnalysis?.confidence ?? "Low"} confidence
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-5">
+                  <div>
+                    <p className="text-xs text-slate-500">Sparse points</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{sceneAnalysis?.pointCount ?? reconstruction?.sparsePointCount ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Width</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{room ? room.width.toFixed(2) : "-"} units</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Depth</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{room ? room.depth.toFixed(2) : "-"} units</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Height</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{room ? room.height.toFixed(2) : "-"} units</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Camera path</p>
+                    <p className="mt-1 text-sm font-semibold text-white">{sceneAnalysis?.cameraPath.available ? `${sceneAnalysis.cameraPath.positions.length} poses` : "Unavailable"}</p>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs text-slate-300">
+                  {denseAvailabilityText} Next step: Install CUDA-enabled COLMAP or continue with visual preview pipeline.
+                </div>
+              </div>
+            )}
             <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -383,6 +440,27 @@ export default function ViewerPage() {
                     </button>
                   ))}
                 </div>
+                {activePointCloud?.source === "colmap_sparse" && (
+                  <>
+                    {([
+                      ["Sparse points", showSparsePoints, setShowSparsePoints],
+                      ["Room bounds", showRoomBounds, setShowRoomBounds],
+                      ["Estimated floor", showEstimatedFloor, setShowEstimatedFloor],
+                      ["Camera path", showCameraPath, setShowCameraPath]
+                    ] as const).map(([label, enabled, setter]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setter((current) => !current)}
+                        className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                          enabled ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"
+                        }`}
+                      >
+                        {enabled ? `Hide ${label}` : `Show ${label}`}
+                      </button>
+                    ))}
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowReference((current) => !current)}
@@ -395,7 +473,18 @@ export default function ViewerPage() {
               </div>
             </div>
           )}
-          <ViewerScene modelUrl={modelUrl} pointCloud={activePointCloud} pointSize={pointSize} showReference={showReference} resetKey={viewerResetKey} />
+          <ViewerScene
+            modelUrl={modelUrl}
+            pointCloud={activePointCloud}
+            sceneAnalysis={activeSceneAnalysis}
+            pointSize={pointSize}
+            showSparsePoints={showSparsePoints}
+            showRoomBounds={showRoomBounds}
+            showEstimatedFloor={showEstimatedFloor}
+            showCameraPath={showCameraPath}
+            showReference={showReference}
+            resetKey={viewerResetKey}
+          />
         </section>
 
         <aside className="glass-panel rounded-lg p-5">
