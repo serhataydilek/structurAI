@@ -77,15 +77,36 @@ export default function ProcessingPage() {
   useEffect(() => {
     let active = true;
     const poll = async () => {
-      const next = await getProcessingStatus(params.id);
-      if (!active) return;
-      setStatus(next);
-      if (next.status === "Processing") {
-        window.setTimeout(poll, 1400);
-      } else {
-        getCaptureSummary(params.id).then(setSummary).catch(() => setSummary(null));
-        getFrames(params.id).then(setFrames).catch(() => setFrames([]));
-        getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
+      try {
+        const next = await getProcessingStatus(params.id);
+        if (!active) return;
+        setStatus(next);
+        if (next.status === "Processing") {
+          window.setTimeout(() => {
+            poll().catch(() => undefined);
+          }, 1400);
+        } else {
+          getCaptureSummary(params.id).then(setSummary).catch(() => setSummary(null));
+          getFrames(params.id).then(setFrames).catch(() => setFrames([]));
+          getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
+        }
+      } catch (error) {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : "Cannot reach Structura API.";
+        const isMissingProject = message.toLowerCase().includes("not found");
+        setStatus((current) => current ?? {
+          projectId: params.id,
+          status: "Draft",
+          progress: 0,
+          currentStep: isMissingProject ? "Project not found" : "Backend unavailable",
+          steps: ["Upload complete", "Extracting frames", "Analyzing capture quality", "Preparing reconstruction workspace", "Ready for sparse reconstruction"],
+          workspacePrepared: false,
+          extractedFrameCount: 0,
+          selectedFpsMode: "Balanced",
+          extractionFps: 2,
+          warnings: [message],
+          readinessLabel: "Poor Capture"
+        });
       }
     };
     poll().catch(() => undefined);
