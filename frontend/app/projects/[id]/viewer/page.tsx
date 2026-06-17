@@ -283,7 +283,15 @@ export default function ViewerPage() {
                   </select>
                 </div>
                 {selectedAttempt && (
-                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className="mt-4 grid gap-3 md:grid-cols-5">
+                    <div>
+                      <p className="text-xs text-slate-500">Frame selection</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.frameSelectionMode ?? "All frames"}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500">Selected frames</p>
+                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.selectedFrameCount ?? selectedAttempt.extractedFrameCount}/{selectedAttempt.sourceFrameCount ?? selectedAttempt.extractedFrameCount}</p>
+                    </div>
                     <div>
                       <p className="text-xs text-slate-500">Registered</p>
                       <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registeredImageCount}/{selectedAttempt.extractedFrameCount}</p>
@@ -291,10 +299,6 @@ export default function ViewerPage() {
                     <div>
                       <p className="text-xs text-slate-500">Ratio</p>
                       <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.registrationRatioLabel ?? `${Math.round(selectedAttempt.registrationRatio * 100)}%`}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Sparse points</p>
-                      <p className="mt-1 text-sm font-semibold text-white">{selectedAttempt.sparsePointCount}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Quality</p>

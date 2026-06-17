@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, runDenseReconstruction, runSparseReconstruction, startProcessing } from "@/lib/api";
-import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary } from "@/lib/types";
+import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, startProcessing } from "@/lib/api";
+import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary } from "@/lib/types";
 import { AlertTriangle, Check, Cpu, ImageIcon, Loader2 } from "lucide-react";
 
 export default function ProcessingPage() {
@@ -22,6 +22,8 @@ export default function ProcessingPage() {
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
   const [matchingMode, setMatchingMode] = useState<ReconstructionMatchingMode>("Auto");
+  const [frameSelectionMode, setFrameSelectionMode] = useState<FrameSelectionMode>("Balanced subset");
+  const [frameSelectionPreview, setFrameSelectionPreview] = useState<FrameSelectionPreview | null>(null);
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [largeFrame, setLargeFrame] = useState<FramePreview | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
@@ -31,6 +33,10 @@ export default function ProcessingPage() {
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
   }, [params.id]);
+
+  useEffect(() => {
+    previewFrameSelection(params.id, frameSelectionMode).then(setFrameSelectionPreview).catch(() => setFrameSelectionPreview(null));
+  }, [params.id, frameSelectionMode, summary?.extractedFrameCount, status?.extractedFrameCount]);
 
   useEffect(() => {
     if (searchParams.get("autostart") !== "1") return;
@@ -117,7 +123,7 @@ export default function ProcessingPage() {
     setReconstructionError("");
     setReconstruction((current) => current ? { ...current, status: "Reconstructing Sparse Model" } : current);
     try {
-      const result = await runSparseReconstruction(params.id, { matchingMode });
+      const result = await runSparseReconstruction(params.id, { matchingMode, frameSelectionMode });
       setReconstruction(result);
       getProject(params.id).then(setProject).catch(() => undefined);
     } catch (error) {
@@ -313,6 +319,44 @@ export default function ProcessingPage() {
             <p className="mt-2 text-xs text-slate-500">Auto uses Video Sequential for video captures and Photo Exhaustive for photo-only captures.</p>
           </div>
 
+          <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <p className="text-xs text-slate-500">Frame selection mode</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(["Balanced subset", "All frames", "Sharpest subset", "Evenly spaced subset"] as FrameSelectionMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={reconstructing}
+                  onClick={() => setFrameSelectionMode(mode)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium ${
+                    frameSelectionMode === mode
+                      ? "border-brand bg-brand/10 text-white"
+                      : "border-white/10 bg-slate-950/50 text-slate-300 hover:bg-white/10"
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  {mode === "Balanced subset" ? "Balanced subset recommended" : mode}
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-sm leading-6 text-slate-400">
+              Using every extracted frame can hurt reconstruction if many frames are blurry, redundant, or weakly matched. A balanced subset often improves COLMAP matching.
+            </p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-xs text-slate-500">Source frames</p>
+                <p className="mt-1 text-sm font-semibold text-white">{frameSelectionPreview?.sourceFrameCount ?? summary?.extractedFrameCount ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Selected frames</p>
+                <p className="mt-1 text-sm font-semibold text-white">{frameSelectionPreview?.selectedFrameCount ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Mode</p>
+                <p className="mt-1 text-sm font-semibold text-white">{frameSelectionPreview?.mode ?? frameSelectionMode}</p>
+              </div>
+            </div>
+          </div>
+
           <div className="mt-5 grid gap-4 md:grid-cols-5">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">COLMAP</p>
@@ -416,6 +460,9 @@ export default function ProcessingPage() {
                       <span>{attempt.label}</span>
                       <span className="text-xs">{attempt.isBestAttempt ? "Best attempt" : attempt.status}</span>
                     </div>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {attempt.frameSelectionMode ?? "All frames"} · {attempt.selectedFrameCount ?? attempt.extractedFrameCount} selected from {attempt.sourceFrameCount ?? attempt.extractedFrameCount} frames · {attempt.registeredImageCount} registered · {attempt.registrationRatioLabel ?? `${Math.round(attempt.registrationRatio * 100)}%`} · {attempt.sparsePointCount} points · {attempt.sparseQualityLabel}
+                    </p>
                     {attempt.failureReason && <p className="mt-1 text-xs text-red-100/80">{attempt.failureReason}</p>}
                   </div>
                 ))}

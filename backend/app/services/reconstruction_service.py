@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 import math
 import shutil
 import subprocess
@@ -59,6 +60,10 @@ CUDA_DENSE_FAILURE_MESSAGE = (
 )
 COLMAP_WITHOUT_CUDA_HINT = "COLMAP appears to be installed without CUDA support. Dense stereo may fail."
 MATCHING_MODES = {"Auto", "Video Sequential", "Photo Exhaustive"}
+FRAME_SELECTION_MODES = {"All frames", "Balanced subset", "Sharpest subset", "Evenly spaced subset"}
+DEFAULT_FRAME_SELECTION_MODE = "Balanced subset"
+DEFAULT_SELECTED_FRAME_CAP = 120
+MIN_SELECTED_FRAMES = 40
 SPARSE_MODEL_FILES = (("cameras.bin", "images.bin", "points3D.bin"), ("cameras.txt", "images.txt", "points3D.txt"))
 
 
@@ -166,6 +171,141 @@ def _frames(project_id: str) -> list[Path]:
     if not frames_dir.exists():
         return []
     return sorted(frames_dir.glob("frame_*.jpg"))
+
+
+def normalize_frame_selection_mode(mode: str | None) -> str:
+    if not mode:
+        return DEFAULT_FRAME_SELECTION_MODE
+    normalized = mode.strip().lower()
+    for label in FRAME_SELECTION_MODES:
+        if normalized == label.lower():
+            return label
+    raise ReconstructionError("Frame selection mode must be All frames, Balanced subset, Sharpest subset, or Evenly spaced subset.")
+
+
+def _target_selection_count(frame_count: int) -> int:
+    if frame_count <= MIN_SELECTED_FRAMES:
+        return frame_count
+    return min(DEFAULT_SELECTED_FRAME_CAP, frame_count)
+
+
+def _frame_sharpness_map(frames: list[Path]) -> dict[str, float]:
+    scores: dict[str, float] = {}
+    for frame in frames:
+        score = processing_service._sharpness_score(frame)
+        if score is not None:
+            scores[frame.name] = score
+    return scores
+
+
+def _evenly_spaced_frames(frames: list[Path], count: int) -> list[Path]:
+    if count >= len(frames):
+        return frames
+    if count <= 1:
+        return frames[:count]
+    indexes = sorted({round(index * (len(frames) - 1) / (count - 1)) for index in range(count)})
+    return [frames[index] for index in indexes]
+
+
+def _sharpest_frames(frames: list[Path], count: int, sharpness: dict[str, float]) -> list[Path]:
+    if len(sharpness) < max(1, min(len(frames), count) // 2):
+        return _evenly_spaced_frames(frames, count)
+    selected = sorted(frames, key=lambda frame: sharpness.get(frame.name, -1), reverse=True)[:count]
+    selected_names = {frame.name for frame in selected}
+    return [frame for frame in frames if frame.name in selected_names]
+
+
+def _balanced_frames(frames: list[Path], count: int, sharpness: dict[str, float]) -> list[Path]:
+    if count >= len(frames):
+        return frames
+    if not sharpness:
+        return _evenly_spaced_frames(frames, count)
+    selected: list[Path] = []
+    for bucket_index in range(count):
+        start = math.floor(bucket_index * len(frames) / count)
+        end = math.floor((bucket_index + 1) * len(frames) / count)
+        bucket = frames[start:max(start + 1, end)]
+        selected.append(max(bucket, key=lambda frame: sharpness.get(frame.name, -1)))
+    seen: set[str] = set()
+    unique = []
+    for frame in selected:
+        if frame.name not in seen:
+            seen.add(frame.name)
+            unique.append(frame)
+    if len(unique) < count:
+        for frame in _evenly_spaced_frames(frames, count):
+            if frame.name not in seen:
+                seen.add(frame.name)
+                unique.append(frame)
+            if len(unique) >= count:
+                break
+    return sorted(unique, key=lambda frame: frames.index(frame))
+
+
+def frame_selection_preview(project_id: str, mode: str | None = None) -> dict[str, Any] | None:
+    if not project_repository.get_project(project_id):
+        return None
+    frames = _frames(project_id)
+    selection_mode = normalize_frame_selection_mode(mode)
+    selected_count = len(frames) if selection_mode == "All frames" else _target_selection_count(len(frames))
+    return {
+        "projectId": project_id,
+        "mode": selection_mode,
+        "sourceFrameCount": len(frames),
+        "selectedFrameCount": selected_count,
+        "cap": DEFAULT_SELECTED_FRAME_CAP,
+        "minimumWhenAvailable": MIN_SELECTED_FRAMES,
+    }
+
+
+def _create_frame_selection(project_id: str, mode: str | None = None) -> dict[str, Any]:
+    frames = _frames(project_id)
+    selection_mode = normalize_frame_selection_mode(mode)
+    if not frames:
+        raise ReconstructionError("No extracted frames found. Process the capture before running sparse reconstruction.")
+
+    sharpness = _frame_sharpness_map(frames)
+    target_count = len(frames) if selection_mode == "All frames" else _target_selection_count(len(frames))
+    if selection_mode == "All frames":
+        selected = frames
+        selection_id = f"all-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        selected_folder = _frames_dir(project_id)
+    elif selection_mode == "Sharpest subset":
+        selected = _sharpest_frames(frames, target_count, sharpness)
+        selection_id = str(uuid4())
+        selected_folder = PROCESSED_DIR / project_id / "reconstruction_inputs" / selection_id / "frames"
+    elif selection_mode == "Evenly spaced subset":
+        selected = _evenly_spaced_frames(frames, target_count)
+        selection_id = str(uuid4())
+        selected_folder = PROCESSED_DIR / project_id / "reconstruction_inputs" / selection_id / "frames"
+    else:
+        selected = _balanced_frames(frames, target_count, sharpness)
+        selection_id = str(uuid4())
+        selected_folder = PROCESSED_DIR / project_id / "reconstruction_inputs" / selection_id / "frames"
+
+    if selection_mode != "All frames":
+        if selected_folder.exists():
+            shutil.rmtree(selected_folder)
+        selected_folder.mkdir(parents=True, exist_ok=True)
+        for frame in selected:
+            shutil.copy2(frame, selected_folder / frame.name)
+
+    selected_scores = [sharpness[frame.name] for frame in selected if frame.name in sharpness]
+    average_selected_sharpness = round(sum(selected_scores) / len(selected_scores), 2) if selected_scores else None
+    metadata = reconstruction_repository.create_frame_selection(
+        selection_id=selection_id,
+        project_id=project_id,
+        mode=selection_mode,
+        source_frame_count=len(frames),
+        selected_frame_count=len(selected),
+        average_selected_sharpness=average_selected_sharpness,
+        selected_frame_filenames=[frame.name for frame in selected],
+        selected_frame_folder=str(selected_folder),
+    )
+    metadata_path = selected_folder.parent / "selection.json" if selection_mode != "All frames" else PROCESSED_DIR / project_id / "reconstruction_inputs" / f"{selection_id}.json"
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return metadata
 
 
 def _safe_log_preview(path: Path, max_chars: int = 1600) -> str:
@@ -611,6 +751,10 @@ def _legacy_attempt(project_id: str, metadata: dict[str, Any] | None, paths: dic
         "projectId": project_id,
         "createdAt": metadata.get("completed_at") or metadata.get("started_at") or metadata.get("updated_at") if metadata else "",
         "extractedFrameCount": extracted,
+        "sourceFrameCount": extracted,
+        "selectedFrameCount": extracted,
+        "frameSelectionMode": "All frames",
+        "selectedFrameFolder": str(_frames_dir(project_id)),
         "registeredImageCount": registered,
         "registrationRatio": ratio,
         "registrationRatioLabel": f"{registered}/{extracted} frames registered" if extracted else "No extracted frames",
@@ -635,12 +779,17 @@ def _attempts_for_project(project_id: str, metadata: dict[str, Any] | None, path
     attempts = reconstruction_repository.list_attempts(project_id)
     legacy = _legacy_attempt(project_id, metadata, paths, frame_count)
     if legacy:
+        if attempts:
+            legacy["createdAt"] = ""
         attempts.append(legacy)
     best_id = _best_attempt(attempts)["attemptId"] if attempts else None
     normalized = []
     for attempt in attempts:
         item = dict(attempt)
         item["registrationRatioLabel"] = f"{item['registeredImageCount']}/{item['extractedFrameCount']} frames registered" if item["extractedFrameCount"] else "No extracted frames"
+        item["sourceFrameCount"] = item.get("sourceFrameCount") or item["extractedFrameCount"]
+        item["selectedFrameCount"] = item.get("selectedFrameCount") or item["extractedFrameCount"]
+        item["frameSelectionMode"] = item.get("frameSelectionMode") or "All frames"
         item["isBestAttempt"] = item["attemptId"] == best_id
         item["label"] = _attempt_label(item)
         normalized.append(item)
@@ -978,11 +1127,20 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "pointCount": sparse_point_count,
             "sparsePointCount": sparse_point_count,
             "extractedFrameCount": frame_count,
+            "sourceFrameCount": frame_count,
+            "selectedFrameCount": frame_count,
+            "frameSelectionMode": DEFAULT_FRAME_SELECTION_MODE,
+            "selectedFrameFolder": str(_frames_dir(project_id)),
             "registeredImageCount": registered_image_count,
             "registrationRatio": registration_ratio,
             "registrationRatioLabel": f"{registered_image_count}/{frame_count} frames registered" if frame_count else "No extracted frames",
             "sparseQualityLabel": sparse_quality,
             "sparseReconstructionQuality": sparse_quality,
+            "reconstructionAttempts": [],
+            "bestAttempt": None,
+            "latestAttempt": None,
+            "displayedAttempt": None,
+            "displayedAttemptRole": None,
             "denseReadiness": dense_readiness,
             "denseRecommended": dense_readiness["recommended"],
             "densePointCloudAvailable": _dense_point_cloud_available(paths),
@@ -1065,6 +1223,10 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "pointCount": sparse_point_count,
         "sparsePointCount": sparse_point_count,
         "extractedFrameCount": extracted_frame_count,
+        "sourceFrameCount": display_attempt.get("sourceFrameCount", extracted_frame_count) if display_attempt else extracted_frame_count,
+        "selectedFrameCount": display_attempt.get("selectedFrameCount", extracted_frame_count) if display_attempt else extracted_frame_count,
+        "frameSelectionMode": display_attempt.get("frameSelectionMode", "All frames") if display_attempt else "All frames",
+        "selectedFrameFolder": display_attempt.get("selectedFrameFolder") if display_attempt else str(_frames_dir(project_id)),
         "registeredImageCount": registered_image_count,
         "registrationRatio": registration_ratio,
         "registrationRatioLabel": f"{registered_image_count}/{extracted_frame_count} frames registered" if extracted_frame_count else "No extracted frames",
@@ -1109,7 +1271,7 @@ def reconstruction_summary(project_id: str) -> dict[str, Any] | None:
     return _base_summary(project_id)
 
 
-def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None) -> dict[str, Any]:
+def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None, frame_selection_mode: str | None = None) -> dict[str, Any]:
     project = project_repository.get_project(project_id)
     if not project:
         raise ReconstructionError("Project not found")
@@ -1120,6 +1282,8 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
 
     requested_matching_mode = normalize_matching_mode(matching_mode)
     matching_mode_used = _matching_mode_to_use(requested_matching_mode, project_id)
+    selection = _create_frame_selection(project_id, frame_selection_mode)
+    selected_frame_folder = Path(selection["selectedFrameFolder"])
     capture_fps_mode, extraction_fps = _capture_fps_metadata(project_id)
     attempt_id = str(uuid4())
 
@@ -1155,6 +1319,10 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
         attempt_id=attempt_id,
         project_id=project_id,
         extracted_frame_count=len(frames),
+        source_frame_count=selection["sourceFrameCount"],
+        selected_frame_count=selection["selectedFrameCount"],
+        frame_selection_mode=selection["mode"],
+        selected_frame_folder=selection["selectedFrameFolder"],
         registered_image_count=0,
         registration_ratio=0,
         sparse_point_count=0,
@@ -1195,7 +1363,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
                 "--database_path",
                 str(paths["database"]),
                 "--image_path",
-                str(_frames_dir(project_id)),
+                str(selected_frame_folder),
                 "--ImageReader.single_camera",
                 "1",
             ],
@@ -1221,7 +1389,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
                 "--database_path",
                 str(paths["database"]),
                 "--image_path",
-                str(_frames_dir(project_id)),
+                str(selected_frame_folder),
                 "--output_path",
                 str(paths["sparse"]),
             ],
@@ -1233,10 +1401,14 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
             attempt_id=attempt_id,
             project_id=project_id,
             extracted_frame_count=len(frames),
+            source_frame_count=selection["sourceFrameCount"],
+            selected_frame_count=selection["selectedFrameCount"],
+            frame_selection_mode=selection["mode"],
+            selected_frame_folder=selection["selectedFrameFolder"],
             registered_image_count=_registered_image_count(paths),
-            registration_ratio=_registration_ratio(_registered_image_count(paths), len(frames)),
+            registration_ratio=_registration_ratio(_registered_image_count(paths), selection["selectedFrameCount"]),
             sparse_point_count=_point_count(paths),
-            sparse_quality_label=_sparse_quality_label(_registered_image_count(paths), _registration_ratio(_registered_image_count(paths), len(frames)), _point_count(paths)),
+            sparse_quality_label=_sparse_quality_label(_registered_image_count(paths), _registration_ratio(_registered_image_count(paths), selection["selectedFrameCount"]), _point_count(paths)),
             matching_mode=matching_mode_used,
             selected_fps=capture_fps_mode,
             extraction_fps=extraction_fps,
@@ -1277,13 +1449,17 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
     if conversion_warning:
         warnings.append(conversion_warning)
     registered_image_count = _registered_image_count(paths)
-    registration_ratio = _registration_ratio(registered_image_count, len(frames))
+    registration_ratio = _registration_ratio(registered_image_count, selection["selectedFrameCount"])
     sparse_point_count = _point_count(paths)
     sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
     reconstruction_repository.upsert_attempt(
         attempt_id=attempt_id,
         project_id=project_id,
         extracted_frame_count=len(frames),
+        source_frame_count=selection["sourceFrameCount"],
+        selected_frame_count=selection["selectedFrameCount"],
+        frame_selection_mode=selection["mode"],
+        selected_frame_folder=selection["selectedFrameFolder"],
         registered_image_count=registered_image_count,
         registration_ratio=registration_ratio,
         sparse_point_count=sparse_point_count,
@@ -1304,6 +1480,10 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None)
         attempt_id=attempt_id,
         project_id=project_id,
         extracted_frame_count=len(frames),
+        source_frame_count=selection["sourceFrameCount"],
+        selected_frame_count=selection["selectedFrameCount"],
+        frame_selection_mode=selection["mode"],
+        selected_frame_folder=selection["selectedFrameFolder"],
         registered_image_count=registered_image_count,
         registration_ratio=registration_ratio,
         sparse_point_count=sparse_point_count,
@@ -1352,6 +1532,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     attempts = _attempts_for_project(project_id, metadata, legacy_paths, len(_frames(project_id)))
     best_attempt = _best_attempt(attempts) if attempts else None
     paths = _attempt_paths_from_record(best_attempt, project_id)
+    dense_image_path = Path(best_attempt["selectedFrameFolder"]) if best_attempt and best_attempt.get("selectedFrameFolder") else _frames_dir(project_id)
     sparse_model_path = _detected_sparse_model_path(paths)
     if not sparse_model_path:
         message = _sparse_model_missing_message(paths)
@@ -1407,7 +1588,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
                 colmap,
                 "image_undistorter",
                 "--image_path",
-                str(_frames_dir(project_id)),
+                str(dense_image_path),
                 "--input_path",
                 str(sparse_model_path),
                 "--output_path",

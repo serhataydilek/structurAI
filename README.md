@@ -186,6 +186,15 @@ Matching modes:
 - `Video Sequential`: runs `colmap sequential_matcher`.
 - `Photo Exhaustive`: runs `colmap exhaustive_matcher`.
 
+Frame selection modes:
+
+- `Balanced subset` is the recommended default. It caps video-style inputs to 120 selected frames, keeps coverage across the full capture, and prefers sharper frames when sharpness scores are available.
+- `All frames` keeps the old behavior and sends every extracted frame to COLMAP. Use it for small, deliberate photo sets or short captures where most frames are sharp and useful.
+- `Sharpest subset` chooses the sharpest scored frames up to the 120-frame cap. Use it when blur is the main problem, but coverage is still broad enough.
+- `Evenly spaced subset` samples across the full timeline up to the 120-frame cap. Use it when sharpness scores are unavailable or when temporal coverage matters more than per-frame sharpness.
+
+Frame selection matters because more frames are not always better for COLMAP. Many blurry, redundant, or weakly matched frames can make feature matching worse than a smaller, cleaner input set.
+
 How to improve sparse reconstruction quality:
 
 - Use Detailed 3 FPS for video captures with fast camera motion or thin point clouds.

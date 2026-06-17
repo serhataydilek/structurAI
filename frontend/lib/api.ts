@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -84,10 +84,17 @@ export function getCaptureSummary(projectId: string) {
   return request<CaptureSummary>(`/projects/${projectId}/capture-summary`);
 }
 
-export function runSparseReconstruction(projectId: string, options?: { matchingMode?: ReconstructionMatchingMode }) {
+export function runSparseReconstruction(projectId: string, options?: { matchingMode?: ReconstructionMatchingMode; frameSelectionMode?: FrameSelectionMode }) {
   return request<ReconstructionSummary>(`/projects/${projectId}/reconstruct/sparse`, {
     method: "POST",
-    body: JSON.stringify({ matchingMode: options?.matchingMode ?? "Auto" })
+    body: JSON.stringify({ matchingMode: options?.matchingMode ?? "Auto", frameSelectionMode: options?.frameSelectionMode ?? "Balanced subset" })
+  });
+}
+
+export function previewFrameSelection(projectId: string, mode: FrameSelectionMode) {
+  return request<FrameSelectionPreview>(`/projects/${projectId}/frame-selection/preview`, {
+    method: "POST",
+    body: JSON.stringify({ mode })
   });
 }
 

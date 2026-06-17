@@ -93,6 +93,7 @@ export type Diagnostics = {
 export type ReadinessLabel = "Poor Capture" | "Usable Prototype Capture" | "Good Reconstruction Candidate";
 export type ExtractionFpsMode = "Fast" | "Balanced" | "Detailed";
 export type ReconstructionMatchingMode = "Auto" | "Video Sequential" | "Photo Exhaustive";
+export type FrameSelectionMode = "Balanced subset" | "All frames" | "Sharpest subset" | "Evenly spaced subset";
 
 export type FramePreview = {
   filename: string;
@@ -138,6 +139,10 @@ export type ReconstructionSummary = {
   registrationRatioLabel?: string;
   sparseQualityLabel?: string;
   sparseReconstructionQuality?: string;
+  sourceFrameCount?: number;
+  selectedFrameCount?: number;
+  frameSelectionMode?: FrameSelectionMode | string;
+  selectedFrameFolder?: string | null;
   reconstructionAttempts?: ReconstructionAttempt[];
   bestAttempt?: ReconstructionAttempt | null;
   latestAttempt?: ReconstructionAttempt | null;
@@ -199,6 +204,10 @@ export type ReconstructionAttempt = {
   projectId: string;
   createdAt: string;
   extractedFrameCount: number;
+  sourceFrameCount?: number;
+  selectedFrameCount?: number;
+  frameSelectionMode?: FrameSelectionMode | string;
+  selectedFrameFolder?: string | null;
   registeredImageCount: number;
   registrationRatio: number;
   registrationRatioLabel?: string;
@@ -214,6 +223,15 @@ export type ReconstructionAttempt = {
   failureReason?: string | null;
   label?: string;
   source?: string;
+};
+
+export type FrameSelectionPreview = {
+  projectId: string;
+  mode: FrameSelectionMode;
+  sourceFrameCount: number;
+  selectedFrameCount: number;
+  cap: number;
+  minimumWhenAvailable: number;
 };
 
 export type ViewerModeRecommendation = "dense_point_cloud" | "sparse_point_cloud" | "prototype_preview";

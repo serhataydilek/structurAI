@@ -46,6 +46,11 @@ class ProcessingOptions(BaseModel):
 
 class SparseReconstructionOptions(BaseModel):
     matchingMode: str = "Auto"
+    frameSelectionMode: str = "Balanced subset"
+
+
+class FrameSelectionPreviewOptions(BaseModel):
+    mode: str = "Balanced subset"
 
 
 def _is_dev_mode() -> bool:
@@ -212,10 +217,22 @@ def run_sparse_reconstruction(project_id: str, payload: SparseReconstructionOpti
     if not project_repository.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     try:
-        return reconstruction_service.run_sparse_reconstruction(project_id, payload.matchingMode if payload else "Auto")
+        return reconstruction_service.run_sparse_reconstruction(
+            project_id,
+            payload.matchingMode if payload else "Auto",
+            payload.frameSelectionMode if payload else "Balanced subset",
+        )
     except reconstruction_service.ReconstructionError as exc:
         summary = reconstruction_service.reconstruction_summary(project_id)
         raise HTTPException(status_code=400, detail={"message": str(exc), "summary": summary}) from exc
+
+
+@app.post("/projects/{project_id}/frame-selection/preview")
+def preview_frame_selection(project_id: str, payload: FrameSelectionPreviewOptions | None = None) -> dict:
+    preview = reconstruction_service.frame_selection_preview(project_id, payload.mode if payload else "Balanced subset")
+    if not preview:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return preview
 
 
 @app.post("/projects/{project_id}/reconstruct/dense")

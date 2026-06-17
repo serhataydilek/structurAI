@@ -151,6 +151,10 @@ def _decode_attempt(row: Any) -> dict[str, Any]:
     item["projectId"] = item.pop("project_id")
     item["createdAt"] = item.pop("created_at")
     item["extractedFrameCount"] = item.pop("extracted_frame_count")
+    item["sourceFrameCount"] = item.pop("source_frame_count", item["extractedFrameCount"])
+    item["selectedFrameCount"] = item.pop("selected_frame_count", item["extractedFrameCount"])
+    item["frameSelectionMode"] = item.pop("frame_selection_mode", "All frames")
+    item["selectedFrameFolder"] = item.pop("selected_frame_folder", None)
     item["registeredImageCount"] = item.pop("registered_image_count")
     item["registrationRatio"] = item.pop("registration_ratio")
     item["sparsePointCount"] = item.pop("sparse_point_count")
@@ -173,6 +177,10 @@ def upsert_attempt(
     attempt_id: str,
     project_id: str,
     extracted_frame_count: int,
+    source_frame_count: int | None = None,
+    selected_frame_count: int | None = None,
+    frame_selection_mode: str = "All frames",
+    selected_frame_folder: str | None = None,
     registered_image_count: int,
     registration_ratio: float,
     sparse_point_count: int,
@@ -194,6 +202,7 @@ def upsert_attempt(
             """
             INSERT INTO reconstruction_attempts (
                 attempt_id, project_id, created_at, extracted_frame_count, registered_image_count,
+                source_frame_count, selected_frame_count, frame_selection_mode, selected_frame_folder,
                 registration_ratio, sparse_point_count, sparse_quality_label, matching_mode,
                 selected_fps, extraction_fps, status, output_path, log_files_json,
                 sparse_model_folders_json, scene_analysis_summary_json, is_best_attempt,
@@ -201,6 +210,7 @@ def upsert_attempt(
             )
             VALUES (
                 :attempt_id, :project_id, :created_at, :extracted_frame_count, :registered_image_count,
+                :source_frame_count, :selected_frame_count, :frame_selection_mode, :selected_frame_folder,
                 :registration_ratio, :sparse_point_count, :sparse_quality_label, :matching_mode,
                 :selected_fps, :extraction_fps, :status, :output_path, :log_files_json,
                 :sparse_model_folders_json, :scene_analysis_summary_json, :is_best_attempt,
@@ -208,6 +218,10 @@ def upsert_attempt(
             )
             ON CONFLICT(attempt_id) DO UPDATE SET
                 extracted_frame_count = excluded.extracted_frame_count,
+                source_frame_count = excluded.source_frame_count,
+                selected_frame_count = excluded.selected_frame_count,
+                frame_selection_mode = excluded.frame_selection_mode,
+                selected_frame_folder = excluded.selected_frame_folder,
                 registered_image_count = excluded.registered_image_count,
                 registration_ratio = excluded.registration_ratio,
                 sparse_point_count = excluded.sparse_point_count,
@@ -229,6 +243,10 @@ def upsert_attempt(
                 "project_id": project_id,
                 "created_at": now,
                 "extracted_frame_count": extracted_frame_count,
+                "source_frame_count": source_frame_count if source_frame_count is not None else extracted_frame_count,
+                "selected_frame_count": selected_frame_count if selected_frame_count is not None else extracted_frame_count,
+                "frame_selection_mode": frame_selection_mode,
+                "selected_frame_folder": selected_frame_folder,
                 "registered_image_count": registered_image_count,
                 "registration_ratio": registration_ratio,
                 "sparse_point_count": sparse_point_count,
@@ -247,6 +265,55 @@ def upsert_attempt(
             },
         )
     return get_attempt(attempt_id) or {}
+
+
+def create_frame_selection(
+    *,
+    selection_id: str,
+    project_id: str,
+    mode: str,
+    source_frame_count: int,
+    selected_frame_count: int,
+    average_selected_sharpness: float | None,
+    selected_frame_filenames: list[str],
+    selected_frame_folder: str,
+) -> dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO reconstruction_frame_selections (
+                selection_id, project_id, mode, source_frame_count, selected_frame_count,
+                average_selected_sharpness, selected_frame_filenames_json, selected_frame_folder, created_at
+            )
+            VALUES (
+                :selection_id, :project_id, :mode, :source_frame_count, :selected_frame_count,
+                :average_selected_sharpness, :selected_frame_filenames_json, :selected_frame_folder, :created_at
+            )
+            """,
+            {
+                "selection_id": selection_id,
+                "project_id": project_id,
+                "mode": mode,
+                "source_frame_count": source_frame_count,
+                "selected_frame_count": selected_frame_count,
+                "average_selected_sharpness": average_selected_sharpness,
+                "selected_frame_filenames_json": json.dumps(selected_frame_filenames),
+                "selected_frame_folder": selected_frame_folder,
+                "created_at": now,
+            },
+        )
+    return {
+        "selectionId": selection_id,
+        "projectId": project_id,
+        "mode": mode,
+        "sourceFrameCount": source_frame_count,
+        "selectedFrameCount": selected_frame_count,
+        "averageSelectedSharpness": average_selected_sharpness,
+        "selectedFrameFilenames": selected_frame_filenames,
+        "selectedFrameFolder": selected_frame_folder,
+        "createdAt": now,
+    }
 
 
 def get_attempt(attempt_id: str) -> dict[str, Any] | None:

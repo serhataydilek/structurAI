@@ -105,6 +105,10 @@ def init_db() -> None:
                 project_id TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 extracted_frame_count INTEGER NOT NULL,
+                source_frame_count INTEGER NOT NULL DEFAULT 0,
+                selected_frame_count INTEGER NOT NULL DEFAULT 0,
+                frame_selection_mode TEXT NOT NULL DEFAULT 'All frames',
+                selected_frame_folder TEXT,
                 registered_image_count INTEGER NOT NULL DEFAULT 0,
                 registration_ratio REAL NOT NULL DEFAULT 0,
                 sparse_point_count INTEGER NOT NULL DEFAULT 0,
@@ -120,6 +124,19 @@ def init_db() -> None:
                 is_best_attempt INTEGER NOT NULL DEFAULT 0,
                 failure_reason TEXT,
                 updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reconstruction_frame_selections (
+                selection_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                source_frame_count INTEGER NOT NULL,
+                selected_frame_count INTEGER NOT NULL,
+                average_selected_sharpness REAL,
+                selected_frame_filenames_json TEXT NOT NULL DEFAULT '[]',
+                selected_frame_folder TEXT NOT NULL,
+                created_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
             """
@@ -140,6 +157,10 @@ def init_db() -> None:
         _ensure_column(conn, "reconstruction_metadata", "dense_log_files_json", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "reconstruction_metadata", "dense_warnings_json", "TEXT NOT NULL DEFAULT '[]'")
         _ensure_column(conn, "reconstruction_metadata", "dense_error_message", "TEXT")
+        _ensure_column(conn, "reconstruction_attempts", "source_frame_count", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "reconstruction_attempts", "selected_frame_count", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "reconstruction_attempts", "frame_selection_mode", "TEXT NOT NULL DEFAULT 'All frames'")
+        _ensure_column(conn, "reconstruction_attempts", "selected_frame_folder", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

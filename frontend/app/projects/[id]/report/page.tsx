@@ -141,6 +141,20 @@ export default function ReportPage() {
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseQualityLabel ?? "Not Started"}</p>
               </div>
             </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Frame selection</p>
+                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.frameSelectionMode ?? "All frames"}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Selected frames</p>
+                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.selectedFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Source frames</p>
+                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sourceFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0}</p>
+              </div>
+            </div>
             <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Matching mode used</p>
               <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.matchingModeUsed ?? "Not Started"}</p>
