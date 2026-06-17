@@ -23,7 +23,7 @@ export default function ProcessingPage() {
   const [denseReconstructing, setDenseReconstructing] = useState(false);
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
-  const [matchingMode, setMatchingMode] = useState<ReconstructionMatchingMode>("Auto");
+  const [matchingMode, setMatchingMode] = useState<ReconstructionMatchingMode>("Video Sequential");
   const [frameSelectionMode, setFrameSelectionMode] = useState<FrameSelectionMode>("Balanced subset");
   const [frameSelectionPreview, setFrameSelectionPreview] = useState<FrameSelectionPreview | null>(null);
   const [autoProcessing, setAutoProcessing] = useState(false);
@@ -39,6 +39,20 @@ export default function ProcessingPage() {
   useEffect(() => {
     previewFrameSelection(params.id, frameSelectionMode).then(setFrameSelectionPreview).catch(() => setFrameSelectionPreview(null));
   }, [params.id, frameSelectionMode, summary?.extractedFrameCount, status?.extractedFrameCount]);
+
+  useEffect(() => {
+    const imageCount = summary?.imageCount ?? 0;
+    const videoCount = summary?.videoCount ?? 0;
+    const attemptsStarted = Boolean(reconstruction && ((reconstruction.reconstructionAttempts ?? []).length > 0 || reconstruction.sparseStatus !== "Not Started"));
+    if (attemptsStarted) return;
+    if (imageCount > 0 && videoCount === 0) {
+      setMatchingMode("Photo Exhaustive");
+      setFrameSelectionMode("All frames");
+    } else if (videoCount > 0) {
+      setMatchingMode("Video Sequential");
+      setFrameSelectionMode("Balanced subset");
+    }
+  }, [summary?.imageCount, summary?.videoCount, reconstruction?.reconstructionAttempts, reconstruction?.sparseStatus]);
 
   useEffect(() => {
     if (searchParams.get("autostart") !== "1") return;
@@ -124,7 +138,10 @@ export default function ProcessingPage() {
   const sparseComplete = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Complete";
   const denseComplete = reconstruction?.denseStatus === "Dense Reconstruction Complete";
   const denseReadiness = reconstruction?.denseReadiness;
-  const sparseQualityPoor = reconstruction?.sparseQualityLabel === "Poor Sparse Reconstruction";
+  const attempts = reconstruction?.reconstructionAttempts ?? [];
+  const hasSparseAttempt = attempts.length > 0;
+  const sparseFinished = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.sparseStatus === "Sparse Reconstruction Failed" || reconstruction?.status === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Failed";
+  const sparseQualityPoor = Boolean(hasSparseAttempt && sparseFinished && reconstruction?.sparseQualityLabel === "Poor Sparse Reconstruction" && ((reconstruction?.registeredImageCount ?? 0) < 15 || (reconstruction?.sparsePointCount ?? 0) < 1500));
   const canRunDense = sparseComplete && !denseComplete && colmapAvailable && !denseLikelyUnavailable && (denseReadiness?.ready ?? true);
   const denseRecommendedPath = denseLikelyUnavailable
     ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
@@ -134,7 +151,6 @@ export default function ProcessingPage() {
         ? "Use a visual preview pipeline such as Gaussian Splatting"
         : "Retry dense reconstruction with better capture";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
-  const attempts = reconstruction?.reconstructionAttempts ?? [];
   const bestAttempt = reconstruction?.bestAttempt;
   const latestAttempt = reconstruction?.latestAttempt;
   const latestWorseThanBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
@@ -402,7 +418,11 @@ export default function ProcessingPage() {
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-xs text-slate-500">Auto uses Video Sequential for video captures and Photo Exhaustive for photo-only captures.</p>
+            <p className="mt-2 text-xs text-slate-500">
+              {(summary?.imageCount ?? 0) > 0 && (summary?.videoCount ?? 0) === 0
+                ? "Photo sets usually work best with Photo Exhaustive matching."
+                : "Video captures usually work best with Video Sequential matching."}
+            </p>
           </div>
 
           <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -478,7 +498,7 @@ export default function ProcessingPage() {
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Sparse quality</p>
-                <p className="mt-2 text-sm font-semibold text-white">{reconstruction.sparseQualityLabel ?? "Poor Sparse Reconstruction"}</p>
+                <p className="mt-2 text-sm font-semibold text-white">{reconstruction.sparseQualityLabel ?? "Not evaluated"}</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Sparse points</p>

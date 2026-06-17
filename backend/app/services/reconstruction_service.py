@@ -188,6 +188,20 @@ def normalize_frame_selection_mode(mode: str | None) -> str:
     raise ReconstructionError("Frame selection mode must be All frames, Balanced subset, Sharpest subset, or Evenly spaced subset.")
 
 
+def _photo_set_capture(project_id: str) -> bool:
+    capture = capture_repository.get_capture_metadata(project_id)
+    return bool(capture and int(capture["image_count"]) > 0 and int(capture["video_count"]) == 0)
+
+
+def _default_frame_selection_mode(project_id: str) -> str:
+    return "All frames" if _photo_set_capture(project_id) else DEFAULT_FRAME_SELECTION_MODE
+
+
+def _default_matching_mode(project_id: str) -> str:
+    capture = capture_repository.get_capture_metadata(project_id)
+    return "Video Sequential" if capture and int(capture["video_count"]) > 0 else "Photo Exhaustive"
+
+
 def _target_selection_count(frame_count: int) -> int:
     if frame_count <= MIN_SELECTED_FRAMES:
         return frame_count
@@ -994,8 +1008,7 @@ def normalize_matching_mode(mode: str | None) -> str:
 def _matching_mode_to_use(requested_mode: str, project_id: str) -> str:
     if requested_mode != "Auto":
         return requested_mode
-    capture = capture_repository.get_capture_metadata(project_id)
-    return "Video Sequential" if capture and capture["video_count"] > 0 else "Photo Exhaustive"
+    return _default_matching_mode(project_id)
 
 
 def _capture_fps_metadata(project_id: str) -> tuple[str, int]:
@@ -1121,11 +1134,13 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
     if not metadata and not attempts:
         dense_status = "Dense Reconstruction Not Started"
         sparse_status = "Not Started"
-        viewer_mode = _viewer_mode(paths)
-        sparse_point_count = _point_count(paths)
-        registered_image_count = _registered_image_count(paths)
-        registration_ratio = _registration_ratio(registered_image_count, frame_count)
-        sparse_quality = _sparse_quality_label(registered_image_count, registration_ratio, sparse_point_count)
+        viewer_mode = "prototype_preview"
+        sparse_point_count = 0
+        registered_image_count = 0
+        registration_ratio = 0
+        sparse_quality = "Not evaluated"
+        default_matching_mode = _default_matching_mode(project_id)
+        default_frame_selection_mode = _default_frame_selection_mode(project_id)
         dense_readiness = _dense_readiness(
             sparse_status,
             diag["denseReconstructionLikelyAvailable"],
@@ -1147,21 +1162,24 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "inputFrameCount": frame_count,
             "selectedFpsMode": capture_fps_mode,
             "extractionFps": extraction_fps,
-            "matchingMode": "Auto",
+            "matchingMode": default_matching_mode,
             "matchingModeUsed": "Not Started",
-            "sparseOutputExists": _sparse_output_exists(paths),
-            "sparseModelFolders": _sparse_model_folders(paths),
-            "sparsePointCloudAvailable": _point_cloud_available(paths),
+            "sparseOutputExists": False,
+            "sparseModelFolders": [],
+            "sparsePointCloudAvailable": False,
             "pointCount": sparse_point_count,
             "sparsePointCount": sparse_point_count,
             "extractedFrameCount": frame_count,
             "sourceFrameCount": frame_count,
             "selectedFrameCount": frame_count,
-            "frameSelectionMode": DEFAULT_FRAME_SELECTION_MODE,
+            "frameSelectionMode": default_frame_selection_mode,
             "selectedFrameFolder": str(_frames_dir(project_id)),
             "registeredImageCount": registered_image_count,
             "registrationRatio": registration_ratio,
-            "registrationRatioLabel": f"{registered_image_count}/{frame_count} frames registered" if frame_count else "No extracted frames",
+            "selectedRegistrationRatio": 0,
+            "sourceRegistrationRatio": 0,
+            "registrationRatioLabel": "Not evaluated",
+            "sourceRegistrationRatioLabel": "Not evaluated",
             "sparseQualityLabel": sparse_quality,
             "sparseReconstructionQuality": sparse_quality,
             "reconstructionAttempts": [],
@@ -1173,7 +1191,7 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "denseRecommended": dense_readiness["recommended"],
             "densePointCloudAvailable": _dense_point_cloud_available(paths),
             "densePointCount": _dense_point_count(paths),
-            "exportPathStatus": "available" if _point_file(paths).exists() else "missing",
+            "exportPathStatus": "missing",
             "viewerModeRecommendation": viewer_mode,
             "currentBestViewerMode": viewer_mode,
             "logFiles": _log_files(paths),
@@ -1192,7 +1210,7 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
             "denseErrorMessage": None,
             "likelyCauses": [],
             "denseLikelyCauses": [],
-            "lowRegistrationRecommendations": LOW_REGISTRATION_RECOMMENDATIONS if sparse_quality == "Poor Sparse Reconstruction" and registered_image_count > 0 else [],
+            "lowRegistrationRecommendations": [],
             "recommendedFixes": [],
             "recommendedNextAction": _next_action(
                 sparse_status,
@@ -1345,11 +1363,19 @@ def run_sparse_reconstruction_sweep(project_id: str) -> dict[str, Any]:
     if not _frames(project_id):
         raise ReconstructionError("No extracted frames found. Process the capture before running sparse reconstruction.")
 
-    configs = [
-        {"frameSelectionMode": "Balanced subset", "matchingMode": "Video Sequential"},
-        {"frameSelectionMode": "Sharpest subset", "matchingMode": "Video Sequential"},
-        {"frameSelectionMode": "Evenly spaced subset", "matchingMode": "Video Sequential"},
-    ]
+    if _photo_set_capture(project_id):
+        configs = [
+            {"frameSelectionMode": "All frames", "matchingMode": "Photo Exhaustive"},
+            {"frameSelectionMode": "Balanced subset", "matchingMode": "Photo Exhaustive"},
+            {"frameSelectionMode": "Sharpest subset", "matchingMode": "Photo Exhaustive"},
+            {"frameSelectionMode": "Evenly spaced subset", "matchingMode": "Photo Exhaustive"},
+        ]
+    else:
+        configs = [
+            {"frameSelectionMode": "Balanced subset", "matchingMode": "Video Sequential"},
+            {"frameSelectionMode": "Sharpest subset", "matchingMode": "Video Sequential"},
+            {"frameSelectionMode": "Evenly spaced subset", "matchingMode": "Video Sequential"},
+        ]
     results: list[dict[str, Any]] = []
     for config in configs:
         before_ids = {attempt["attemptId"] for attempt in reconstruction_repository.list_attempts(project_id)}
@@ -1389,7 +1415,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
 
     requested_matching_mode = normalize_matching_mode(matching_mode)
     matching_mode_used = _matching_mode_to_use(requested_matching_mode, project_id)
-    selection = _create_frame_selection(project_id, frame_selection_mode)
+    selection = _create_frame_selection(project_id, frame_selection_mode or _default_frame_selection_mode(project_id))
     selected_frame_folder = Path(selection["selectedFrameFolder"])
     capture_fps_mode, extraction_fps = _capture_fps_metadata(project_id)
     attempt_id = str(uuid4())

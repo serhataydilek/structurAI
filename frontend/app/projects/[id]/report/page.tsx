@@ -15,7 +15,9 @@ export default function ReportPage() {
   const bestAttempt = report?.reconstructionMetadata?.bestAttempt;
   const latestAttempt = report?.reconstructionMetadata?.latestAttempt;
   const latestDiffersFromBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
-  const sparseQualityPoor = report?.reconstructionMetadata?.sparseQualityLabel === "Poor Sparse Reconstruction";
+  const reportAttempts = report?.reconstructionMetadata?.reconstructionAttempts ?? [];
+  const reportSparseFinished = report?.reconstructionMetadata?.sparseStatus === "Sparse Reconstruction Complete" || report?.reconstructionMetadata?.sparseStatus === "Sparse Reconstruction Failed";
+  const sparseQualityPoor = Boolean(reportAttempts.length > 0 && reportSparseFinished && report?.reconstructionMetadata?.sparseQualityLabel === "Poor Sparse Reconstruction");
   const selectedFrameCount = report?.reconstructionMetadata?.selectedFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0;
   const registeredImageCount = report?.reconstructionMetadata?.registeredImageCount ?? 0;
   const selectedRegistrationPercent = Math.round((report?.reconstructionMetadata?.selectedRegistrationRatio ?? report?.reconstructionMetadata?.registrationRatio ?? 0) * 100);

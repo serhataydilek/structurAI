@@ -14,7 +14,7 @@ def _detected_output(summary: dict[str, Any] | None) -> str:
         if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction" or points < 1500:
             return "Weak sparse reconstruction preview"
         return "Sparse scene preview"
-    return "Prototype digital twin preview"
+    return "No reconstruction output"
 
 
 def _limitations(summary: dict[str, Any] | None) -> list[str]:
@@ -114,8 +114,8 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "selectedFrameCount": reconstruction_summary["selectedFrameCount"] if reconstruction_summary else 0,
             "frameSelectionMode": reconstruction_summary["frameSelectionMode"] if reconstruction_summary else "Balanced subset",
             "selectedFrameFolder": reconstruction_summary["selectedFrameFolder"] if reconstruction_summary else None,
-            "sparseQualityLabel": reconstruction_summary["sparseQualityLabel"] if reconstruction_summary else "Poor Sparse Reconstruction",
-            "sparseReconstructionQuality": reconstruction_summary["sparseReconstructionQuality"] if reconstruction_summary else "Poor Sparse Reconstruction",
+            "sparseQualityLabel": reconstruction_summary["sparseQualityLabel"] if reconstruction_summary else "Not evaluated",
+            "sparseReconstructionQuality": reconstruction_summary["sparseReconstructionQuality"] if reconstruction_summary else "Not evaluated",
             "reconstructionAttempts": reconstruction_summary["reconstructionAttempts"] if reconstruction_summary else [],
             "bestAttempt": reconstruction_summary["bestAttempt"] if reconstruction_summary else None,
             "latestAttempt": reconstruction_summary["latestAttempt"] if reconstruction_summary else None,

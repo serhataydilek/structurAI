@@ -164,8 +164,11 @@ export default function ViewerPage() {
   const denseLikelyAvailable = reconstruction?.denseReconstructionLikelyAvailable ?? diagnostics?.colmap.denseReconstructionLikelyAvailable ?? "unknown";
   const colmapCudaHint = reconstruction?.colmapCudaHint ?? diagnostics?.colmap.colmapCudaHint ?? (colmapAvailable ? "COLMAP detected; CUDA dense-stereo support is unknown." : "COLMAP not detected.");
   const denseLikelyUnavailable = denseLikelyAvailable === false;
-  const sparseQualityLabel = reconstruction?.sparseQualityLabel ?? "Not Started";
-  const sparseQualityPoor = sparseQualityLabel === "Poor Sparse Reconstruction";
+  const attempts = reconstruction?.reconstructionAttempts ?? [];
+  const hasSparseAttempt = attempts.length > 0;
+  const sparseFinished = sparseStatus === "Sparse Reconstruction Complete" || sparseStatus === "Sparse Reconstruction Failed";
+  const sparseQualityLabel = reconstruction?.sparseQualityLabel ?? "Not evaluated";
+  const sparseQualityPoor = Boolean(hasSparseAttempt && sparseFinished && sparseQualityLabel === "Poor Sparse Reconstruction" && ((reconstruction?.registeredImageCount ?? 0) < 15 || (reconstruction?.sparsePointCount ?? 0) < 1500));
   const showSparseAction = inputFrameCount > 0 && sparseNotStarted;
   const denseReadiness = reconstruction?.denseReadiness;
   const denseReady = denseReadiness?.ready ?? true;
@@ -206,7 +209,6 @@ export default function ViewerPage() {
   const registrationRatioLabel = reconstruction?.registrationRatioLabel ?? "0%";
   const selectedFrameCount = reconstruction?.selectedFrameCount ?? reconstruction?.extractedFrameCount ?? inputFrameCount;
   const selectedRegistrationPercent = Math.round((reconstruction?.selectedRegistrationRatio ?? reconstruction?.registrationRatio ?? 0) * 100);
-  const attempts = reconstruction?.reconstructionAttempts ?? [];
   const selectedAttempt = attempts.find((attempt) => attempt.attemptId === selectedAttemptId) ?? reconstruction?.displayedAttempt ?? reconstruction?.bestAttempt;
   const bestAttempt = reconstruction?.bestAttempt;
   const latestAttempt = reconstruction?.latestAttempt;
@@ -598,7 +600,7 @@ export default function ViewerPage() {
                 </details>
               </div>
             )}
-            {reconstructing && (
+            {reconstructing && !showSparseAction && (
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-sm text-cyan-100">
                 Running COLMAP sparse reconstruction...
               </div>

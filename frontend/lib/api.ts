@@ -92,7 +92,7 @@ export function getCaptureSummary(projectId: string) {
 export function runSparseReconstruction(projectId: string, options?: { matchingMode?: ReconstructionMatchingMode; frameSelectionMode?: FrameSelectionMode }) {
   return request<ReconstructionSummary>(`/projects/${projectId}/reconstruct/sparse`, {
     method: "POST",
-    body: JSON.stringify({ matchingMode: options?.matchingMode ?? "Auto", frameSelectionMode: options?.frameSelectionMode ?? "Balanced subset" })
+    body: JSON.stringify({ matchingMode: options?.matchingMode, frameSelectionMode: options?.frameSelectionMode })
   });
 }
 

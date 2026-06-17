@@ -45,8 +45,8 @@ class ProcessingOptions(BaseModel):
 
 
 class SparseReconstructionOptions(BaseModel):
-    matchingMode: str = "Auto"
-    frameSelectionMode: str = "Balanced subset"
+    matchingMode: str | None = None
+    frameSelectionMode: str | None = None
 
 
 class FrameSelectionPreviewOptions(BaseModel):
