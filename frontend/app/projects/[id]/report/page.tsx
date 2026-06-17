@@ -42,7 +42,7 @@ export default function ReportPage() {
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Detected output</p>
-              <p className="mt-2 text-base font-semibold text-white">{report?.detectedOutput ?? "Prototype digital twin preview"}</p>
+              <p className="mt-2 text-base font-semibold text-white">{report?.detectedOutput ?? "No reconstruction output yet"}</p>
             </div>
           </div>
 
@@ -120,6 +120,24 @@ export default function ReportPage() {
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.recommendedNextAction ?? "Run sparse reconstruction"}</p>
               </div>
             </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-4">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Extracted frames</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{report?.reconstructionMetadata?.extractedFrameCount ?? report?.reconstructionMetadata?.inputFrameCount ?? report?.captureMetadata?.extractedFrameCount ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Registered images</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{report?.reconstructionMetadata?.registeredImageCount ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Registration ratio</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{report?.reconstructionMetadata?.registrationRatioLabel ?? "0%"}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Sparse quality</p>
+                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseQualityLabel ?? "Not Started"}</p>
+              </div>
+            </div>
             <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Matching mode used</p>
               <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.matchingModeUsed ?? "Not Started"}</p>
@@ -139,6 +157,26 @@ export default function ReportPage() {
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.colmapCudaHint ?? "Unknown"}</p>
               </div>
             </div>
+            {(report?.reconstructionMetadata?.denseReadiness?.reasons ?? []).length > 0 && (
+              <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs font-semibold text-slate-300">Dense readiness notes</p>
+                <ul className="mt-2 space-y-1 text-sm text-slate-400">
+                  {(report?.reconstructionMetadata?.denseReadiness?.reasons ?? []).map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(report?.reconstructionMetadata?.lowRegistrationRecommendations ?? []).length > 0 && (
+              <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-4">
+                <p className="text-sm font-semibold text-amber-100">Capture recommendations</p>
+                <ul className="mt-2 space-y-1 text-sm text-amber-100/80">
+                  {(report?.reconstructionMetadata?.lowRegistrationRecommendations ?? []).map((recommendation) => (
+                    <li key={recommendation}>{recommendation}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {report?.reconstructionMetadata?.denseStatus === "Dense Reconstruction Failed" && (
               <div className="mt-4 rounded-md border border-red-400/30 bg-red-400/10 p-4 text-sm text-red-100">
                 <p className="font-semibold">Dense reconstruction failure details</p>
@@ -147,14 +185,17 @@ export default function ReportPage() {
                   <p className="mt-2 text-xs text-red-100/80">Likely causes: {(report.reconstructionMetadata.denseLikelyCauses ?? []).join(", ")}.</p>
                 )}
                 {denseLogEntries.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {denseLogEntries.map(([name, preview]) => (
-                      <div key={name} className="rounded-md border border-red-200/10 bg-slate-950/70 p-3">
-                        <p className="text-xs font-semibold uppercase text-red-100/80">{name}</p>
-                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-5 text-red-50/80">{preview}</pre>
-                      </div>
-                    ))}
-                  </div>
+                  <details className="mt-3 rounded-md border border-red-200/10 bg-slate-950/70 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-red-100/80">Technical dense logs</summary>
+                    <div className="mt-3 space-y-2">
+                      {denseLogEntries.map(([name, preview]) => (
+                        <div key={name} className="rounded-md border border-red-200/10 bg-slate-950/70 p-3">
+                          <p className="text-xs font-semibold uppercase text-red-100/80">{name}</p>
+                          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-5 text-red-50/80">{preview}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
               </div>
             )}

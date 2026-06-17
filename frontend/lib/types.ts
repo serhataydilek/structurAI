@@ -132,6 +132,18 @@ export type ReconstructionSummary = {
   colmapCudaHint?: string | null;
   denseReconstructionLikelyAvailable?: boolean | "unknown";
   inputFrameCount: number;
+  extractedFrameCount?: number;
+  registeredImageCount?: number;
+  registrationRatio?: number;
+  registrationRatioLabel?: string;
+  sparseQualityLabel?: string;
+  sparseReconstructionQuality?: string;
+  denseReadiness?: {
+    ready: boolean;
+    recommended: boolean;
+    reasons: string[];
+  };
+  denseRecommended?: boolean;
   selectedFpsMode?: ExtractionFpsMode;
   extractionFps?: number;
   matchingMode?: ReconstructionMatchingMode | "Not Started";
@@ -171,6 +183,7 @@ export type ReconstructionSummary = {
   denseErrorMessage?: string | null;
   likelyCauses?: string[];
   denseLikelyCauses?: string[];
+  lowRegistrationRecommendations?: string[];
   recommendedFixes?: string[];
   recommendedNextAction?: string;
   nextStep: string;

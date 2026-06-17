@@ -27,7 +27,7 @@ def _limitations(summary: dict[str, Any] | None) -> list[str]:
             "Measurements are approximate in this prototype.",
         ]
     return [
-        "No reconstructed point cloud is available yet. The viewer is using a procedural prototype fallback.",
+        "No reconstructed point cloud is available yet. Upload media, process capture, then run sparse reconstruction to generate a real preview.",
         "Measurements are approximate in this prototype.",
     ]
 
@@ -37,10 +37,12 @@ def _report_next_action(summary: dict[str, Any] | None) -> str:
         return "Run sparse reconstruction"
     if not summary.get("sparsePointCloudAvailable"):
         return "Run sparse reconstruction"
+    if summary.get("denseStatus") == "Dense Reconstruction Failed" and summary.get("denseReconstructionLikelyAvailable") is False:
+        return "Install a CUDA-enabled COLMAP build or use a visual preview pipeline"
+    if summary.get("denseStatus") in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
+        return "Run dense reconstruction"
     if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction":
         return "Improve capture and rerun sparse reconstruction"
-    if summary.get("sparsePointCloudAvailable") and summary.get("denseReconstructionLikelyAvailable") is False:
-        return "Install CUDA-enabled COLMAP for dense reconstruction or continue with visual preview pipeline"
     if summary.get("denseReadiness", {}).get("ready"):
         return "Run dense reconstruction"
     return summary.get("recommendedNextAction") or "Run sparse reconstruction"

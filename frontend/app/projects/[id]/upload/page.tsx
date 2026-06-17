@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { getProject, startProcessing, uploadMedia } from "@/lib/api";
+import { getProject, uploadMedia } from "@/lib/api";
 import type { ExtractionFpsMode, Project } from "@/lib/types";
 import { CheckCircle2, UploadCloud } from "lucide-react";
 
@@ -31,6 +31,7 @@ export default function UploadPage() {
   const [extractionFpsMode, setExtractionFpsMode] = useState<ExtractionFpsMode>("Balanced");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -59,10 +60,11 @@ export default function UploadPage() {
     }
     setUploading(true);
     setError("");
+    setSuccess("");
     try {
       await uploadMedia(params.id, files);
-      await startProcessing(params.id, { extractionFpsMode });
-      router.push(`/projects/${params.id}/processing`);
+      setSuccess("Upload complete. Starting frame extraction...");
+      router.push(`/projects/${params.id}/processing?autostart=1&fps=${extractionFpsMode}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -105,6 +107,7 @@ export default function UploadPage() {
               </div>
             )}
 
+            {success && <p className="mt-4 rounded-md border border-emerald-300/30 bg-emerald-300/10 px-3 py-2 text-sm text-emerald-100">{success}</p>}
             {error && <p className="mt-4 rounded-md border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm text-red-100">{error}</p>}
 
             <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">

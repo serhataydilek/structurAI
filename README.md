@@ -9,7 +9,7 @@ The final product vision is full building-scale digital twins. This MVP starts w
 - Next.js App Router frontend with TypeScript, Tailwind CSS, and React Three Fiber/Drei.
 - FastAPI backend with SQLite metadata and local filesystem uploads.
 - Project creation, media upload, real frame extraction, capture workspace preparation, viewer, annotations, and report flow.
-- Procedural 3D interior preview when `/models/sample-condo.glb` is not available.
+- Empty reconstruction viewer state until real sparse or dense output exists.
 - COLMAP sparse reconstruction integration for Phase 2A when COLMAP is available on PATH.
 - No authentication, payments, teams, admin panels, dense reconstruction, mesh generation, or GLB export yet.
 
@@ -25,7 +25,7 @@ This version now performs the first real capture-processing step:
 - Capture summary and report metadata, including frame count, selected FPS, sharpness metrics, blur warnings, and reconstruction readiness.
 - Dashboard search, status filters, per-project deletion, and local data reset for development.
 
-The interactive 3D viewer shows a real sparse point cloud after COLMAP succeeds. It falls back to the procedural prototype preview when no sparse output exists.
+The interactive 3D viewer shows a real sparse point cloud after COLMAP succeeds. If no sparse or dense output exists, it shows an empty reconstruction state instead of a procedural room.
 
 ## Future Roadmap
 
@@ -120,7 +120,7 @@ Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/point-cloud"
 The viewer switches modes automatically:
 
 - `Sparse Scene Preview` when real COLMAP sparse points are available.
-- `Prototype Digital Twin Preview` when no sparse output exists.
+- `No Reconstruction Output Yet` when no sparse or dense output exists.
 
 This is not a dense mesh or full building model. A sparse point cloud shows matched visual features and camera-derived structure from the uploaded capture. Dense reconstruction, mesh generation, and GLB export remain future milestones.
 
@@ -132,7 +132,7 @@ Phase 2B test flow:
 2. Process capture to extract frames.
 3. Run sparse reconstruction.
 4. Open the viewer.
-5. Verify the viewer shows `Sparse Scene Preview` instead of the procedural preview.
+5. Verify the viewer shows `Sparse Scene Preview` instead of an empty reconstruction state.
 
 ## Sparse Scene Preview
 
@@ -161,7 +161,7 @@ Important limitations:
 - This is not a generated mesh, textured model, or final digital twin.
 - Dense reconstruction still requires a CUDA-enabled COLMAP build on this machine, or another dense/visual preview pipeline.
 
-Viewer controls let you show or hide sparse points, estimated room bounds, estimated floor, camera path, and the procedural reference grid. The procedural fallback is only used when no sparse reconstruction output exists.
+Viewer controls let you show or hide sparse points, estimated room bounds, estimated floor, camera path, and the floor/grid reference.
 
 ## Phase 2C: Sparse Reconstruction Quality
 
@@ -283,7 +283,7 @@ Suggested screenshots:
 - Upload media
 - Capture processing pipeline
 - Capture review and sparse reconstruction summary
-- Prototype digital twin preview
+- No reconstruction output state
 - Generated capture report
 
 ## Application Workflow
@@ -300,14 +300,14 @@ Suggested screenshots:
 5. Review extracted frame thumbnails, warnings, and reconstruction readiness.
 6. Choose a matching mode and run sparse reconstruction if COLMAP is installed.
 7. Run dense reconstruction after sparse reconstruction completes.
-8. Open the viewer. Dense point cloud is preferred, sparse point cloud is the fallback, and procedural preview is used only when no reconstruction exists.
+8. Open the viewer. Dense point cloud is preferred, sparse point cloud is the fallback, and an empty reconstruction state is shown when no reconstruction exists.
 9. Add manual annotations.
 10. Generate the capture report.
 
 ## Current Prototype Limitation
 
 - Sparse and dense point-cloud reconstruction are available when COLMAP is installed, but neither output is a mesh or full digital twin.
-- The viewer uses a procedural 3D interior fallback only when no reconstructed point cloud exists.
+- The viewer shows an empty reconstruction state when no reconstructed point cloud exists.
 - The backend processing service is structured so OpenMVS and Blender CLI can be integrated later.
 - Measurements are approximate in this prototype.
 - Mesh generation and GLB export are not yet enabled in this build.

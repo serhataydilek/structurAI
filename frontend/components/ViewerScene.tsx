@@ -1,8 +1,8 @@
 "use client";
 
 import { Canvas } from "@react-three/fiber";
-import { Environment, Grid, OrbitControls, useGLTF } from "@react-three/drei";
-import { Suspense, useMemo, useState } from "react";
+import { Environment, Grid, OrbitControls } from "@react-three/drei";
+import { useMemo } from "react";
 import type { PointCloudPoint, PointCloudResponse, SceneAnalysis, SceneVector } from "@/lib/types";
 
 export type PointCloudPointSize = "Small" | "Medium" | "Large";
@@ -21,50 +21,6 @@ function sceneTransform(analysis?: SceneAnalysis | null) {
     (point.y - center.y) * scale,
     (point.z - center.z) * scale
   ];
-}
-
-function SampleModel({ url }: { url: string }) {
-  const gltf = useGLTF(url);
-  return <primitive object={gltf.scene} scale={1.15} position={[0, -0.8, 0]} />;
-}
-
-function InteriorPlaceholder() {
-  return (
-    <group>
-      <mesh position={[0, -0.05, 0]} receiveShadow>
-        <boxGeometry args={[6, 0.1, 4.4]} />
-        <meshStandardMaterial color="#1f2937" roughness={0.8} />
-      </mesh>
-      <mesh position={[0, 1.5, -2.2]}>
-        <boxGeometry args={[6, 3.1, 0.12]} />
-        <meshStandardMaterial color="#334155" roughness={0.7} />
-      </mesh>
-      <mesh position={[-3, 1.5, 0]}>
-        <boxGeometry args={[0.12, 3.1, 4.4]} />
-        <meshStandardMaterial color="#263244" roughness={0.7} />
-      </mesh>
-      <mesh position={[3, 1.5, 0]}>
-        <boxGeometry args={[0.12, 3.1, 4.4]} />
-        <meshStandardMaterial color="#263244" roughness={0.7} />
-      </mesh>
-      <mesh position={[-1.2, 1.65, -2.28]}>
-        <boxGeometry args={[1.25, 1.05, 0.08]} />
-        <meshStandardMaterial color="#67e8f9" emissive="#164e63" emissiveIntensity={0.25} />
-      </mesh>
-      <mesh position={[1.55, 0.45, -1.25]}>
-        <boxGeometry args={[1.2, 0.8, 0.75]} />
-        <meshStandardMaterial color="#475569" roughness={0.65} />
-      </mesh>
-      <mesh position={[-1.7, 0.35, 1.1]}>
-        <boxGeometry args={[1.5, 0.7, 0.75]} />
-        <meshStandardMaterial color="#64748b" roughness={0.72} />
-      </mesh>
-      <mesh position={[2.35, 0.85, 1.55]}>
-        <boxGeometry args={[0.55, 1.7, 0.55]} />
-        <meshStandardMaterial color="#94a3b8" roughness={0.7} />
-      </mesh>
-    </group>
-  );
 }
 
 function SparsePointCloud({
@@ -217,7 +173,6 @@ function CameraPath({ analysis }: { analysis?: SceneAnalysis | null }) {
 }
 
 function SceneContent({
-  modelUrl,
   pointCloud,
   sceneAnalysis,
   pointSize,
@@ -227,7 +182,6 @@ function SceneContent({
   showCameraPath,
   showReference
 }: {
-  modelUrl?: string;
   pointCloud?: PointCloudResponse | null;
   sceneAnalysis?: SceneAnalysis | null;
   pointSize: PointCloudPointSize;
@@ -237,7 +191,6 @@ function SceneContent({
   showCameraPath: boolean;
   showReference: boolean;
 }) {
-  const [modelFailed, setModelFailed] = useState(false);
   const hasPointCloud = Boolean(pointCloud?.available && pointCloud.points.length > 0);
 
   return (
@@ -245,25 +198,15 @@ function SceneContent({
       <ambientLight intensity={0.65} />
       <directionalLight position={[4, 5, 3]} intensity={1.5} castShadow />
       <pointLight position={[-3, 2, 2]} intensity={1} color="#67e8f9" />
-      {hasPointCloud ? (
+      {hasPointCloud && (
         <>
           {showSparsePoints && <SparsePointCloud pointCloud={pointCloud as PointCloudResponse} pointSize={pointSize} analysis={sceneAnalysis} />}
           {showEstimatedFloor && <EstimatedFloor analysis={sceneAnalysis} />}
           {showRoomBounds && <RoomScaffold analysis={sceneAnalysis} />}
           {showCameraPath && <CameraPath analysis={sceneAnalysis} />}
         </>
-      ) : (
-        <Suspense fallback={<InteriorPlaceholder />}>
-          {modelUrl && !modelFailed ? (
-          <ErrorBoundary onError={() => setModelFailed(true)}>
-            <SampleModel url={modelUrl} />
-          </ErrorBoundary>
-          ) : (
-            <InteriorPlaceholder />
-          )}
-        </Suspense>
       )}
-      {(!hasPointCloud || showReference) && (
+      {showReference && (
         <Grid infiniteGrid fadeDistance={18} fadeStrength={1.5} cellColor="#334155" sectionColor="#67e8f9" />
       )}
       <Environment preset="city" />
@@ -272,17 +215,7 @@ function SceneContent({
   );
 }
 
-function ErrorBoundary({ children, onError }: { children: React.ReactNode; onError: () => void }) {
-  try {
-    return <>{children}</>;
-  } catch {
-    onError();
-    return <InteriorPlaceholder />;
-  }
-}
-
 export function ViewerScene({
-  modelUrl,
   pointCloud,
   sceneAnalysis,
   pointSize = "Medium",
@@ -293,7 +226,6 @@ export function ViewerScene({
   showReference = true,
   resetKey = 0
 }: {
-  modelUrl?: string;
   pointCloud?: PointCloudResponse | null;
   sceneAnalysis?: SceneAnalysis | null;
   pointSize?: PointCloudPointSize;
@@ -305,6 +237,18 @@ export function ViewerScene({
   resetKey?: number;
 }) {
   const hasPointCloud = Boolean(pointCloud?.available && pointCloud.points.length > 0);
+  if (!hasPointCloud) {
+    return (
+      <div className="flex h-[540px] items-center justify-center rounded-lg border border-white/10 bg-slate-950 p-8 text-center shadow-glow">
+        <div>
+          <p className="text-xl font-semibold text-white">No reconstruction output yet</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
+            Upload media, process capture, then run sparse reconstruction to generate a real preview.
+          </p>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="relative h-[540px] overflow-hidden rounded-lg border border-white/10 bg-slate-950 shadow-glow">
       <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-md border border-brand/25 bg-slate-950/80 px-3 py-2 text-xs font-medium text-cyan-100 backdrop-blur">
@@ -314,11 +258,10 @@ export function ViewerScene({
             : sceneAnalysis?.available
               ? "Sparse scene preview"
               : "Sparse point cloud preview"
-          : "Prototype digital twin preview"}
+          : "No reconstruction output"}
       </div>
-      <Canvas key={resetKey} camera={{ position: hasPointCloud ? [3.5, 2.6, 4.2] : [5, 4, 6], fov: hasPointCloud ? 38 : 45 }} shadows>
+      <Canvas key={resetKey} camera={{ position: [3.5, 2.6, 4.2], fov: 38 }} shadows>
         <SceneContent
-          modelUrl={modelUrl}
           pointCloud={pointCloud}
           sceneAnalysis={sceneAnalysis}
           pointSize={pointSize}

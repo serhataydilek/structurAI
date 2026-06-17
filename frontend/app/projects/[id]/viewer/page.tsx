@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getModel, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
+import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
 import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, Project, ReconstructionSummary, SceneAnalysis } from "@/lib/types";
 import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
 
@@ -35,7 +35,6 @@ export default function ViewerPage() {
   const [showReference, setShowReference] = useState(true);
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
-  const [modelUrl, setModelUrl] = useState<string | undefined>();
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -44,12 +43,6 @@ export default function ViewerPage() {
     getFrames(params.id).then(setFrames).catch(() => setFrames([]));
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     refreshReconstruction();
-    getModel(params.id)
-      .then(async (model) => {
-        const response = await fetch(model.modelUrl, { method: "HEAD" });
-        setModelUrl(response.ok ? model.modelUrl : undefined);
-      })
-      .catch(() => setModelUrl(undefined));
   }, [params.id]);
 
   async function refreshReconstruction() {
@@ -138,9 +131,13 @@ export default function ViewerPage() {
   const colmapCudaHint = reconstruction?.colmapCudaHint ?? diagnostics?.colmap.colmapCudaHint ?? (colmapAvailable ? "COLMAP detected; CUDA dense-stereo support is unknown." : "COLMAP not detected.");
   const denseLikelyUnavailable = denseLikelyAvailable === false;
   const showSparseAction = inputFrameCount > 0 && sparseNotStarted;
-  const canRunDense = sparseStatus === "Sparse Reconstruction Complete" && denseStatus !== "Dense Reconstruction Complete" && colmapAvailable;
+  const denseReadiness = reconstruction?.denseReadiness;
+  const denseReady = denseReadiness?.ready ?? true;
+  const canRunDense = sparseStatus === "Sparse Reconstruction Complete" && denseStatus !== "Dense Reconstruction Complete" && colmapAvailable && !denseLikelyUnavailable && denseReady;
   const denseRecommendedPath = denseLikelyUnavailable
-    ? "Install/use a CUDA-enabled COLMAP build"
+    ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
+    : denseReadiness && !denseReadiness.ready
+      ? "Retry dense reconstruction with better capture"
     : sparseStatus !== "Sparse Reconstruction Complete"
       ? "Continue with sparse preview"
       : denseStatus === "Dense Reconstruction Failed"
@@ -159,16 +156,19 @@ export default function ViewerPage() {
   const activePointCloud = selectedPointCloud?.available ? selectedPointCloud : pointCloud;
   const sparseSceneAvailable = Boolean(sceneAnalysis?.available && activePointCloud?.source === "colmap_sparse");
   const activeSceneAnalysis = activePointCloud?.source === "colmap_sparse" ? sceneAnalysis : null;
-  const outputType = activePointCloud?.source === "colmap_dense" ? "Dense point cloud" : sparseSceneAvailable ? "Sparse scene preview" : activePointCloud?.source === "colmap_sparse" ? "Sparse point cloud" : "Procedural preview";
+  const outputType = activePointCloud?.source === "colmap_dense" ? "Dense point cloud preview" : sparseSceneAvailable ? "Sparse scene preview" : activePointCloud?.source === "colmap_sparse" ? "Sparse point cloud preview" : "No reconstruction output";
   const hasPointCloud = Boolean(activePointCloud?.available && activePointCloud.points.length > 0);
-  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "Prototype Digital Twin Preview";
+  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "No Reconstruction Output Yet";
   const explanation = activePointCloud?.source === "colmap_dense"
     ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or final digital twin yet."
     : sparseSceneAvailable
       ? "This view uses the real COLMAP sparse reconstruction plus estimated room bounds to make the captured space easier to inspect. It is not a dense mesh yet."
       : hasPointCloud
         ? "This is a real sparse point cloud reconstructed from the uploaded capture. It is not a dense mesh yet."
-    : "This is a procedural prototype preview. Process the capture and run sparse reconstruction to view real reconstruction output.";
+    : "Upload media, process capture, then run sparse reconstruction to generate a real preview.";
+  const registeredImageCount = reconstruction?.registeredImageCount ?? 0;
+  const registrationRatioLabel = reconstruction?.registrationRatioLabel ?? "0%";
+  const sparseQualityLabel = reconstruction?.sparseQualityLabel ?? "Not Started";
   const room = sceneAnalysis?.roomScaffold;
   const denseAvailabilityText = denseLikelyUnavailable
     ? "Dense reconstruction requires a CUDA-enabled COLMAP build on this machine."
@@ -195,8 +195,16 @@ export default function ViewerPage() {
           <div className="glass-panel mb-5 rounded-lg p-5">
             <div className="grid gap-4 md:grid-cols-6">
               <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
-                <p className="text-xs text-slate-500">Input frames</p>
+                <p className="text-xs text-slate-500">Extracted frames</p>
                 <p className="mt-1 text-xl font-semibold text-white">{inputFrameCount}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Registered images</p>
+                <p className="mt-1 text-xl font-semibold text-white">{registeredImageCount}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Registration ratio</p>
+                <p className="mt-1 text-xl font-semibold text-white">{registrationRatioLabel}</p>
               </div>
               <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
                 <p className="text-xs text-slate-500">Sparse status</p>
@@ -216,6 +224,20 @@ export default function ViewerPage() {
               </div>
               <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
                 <p className="text-xs text-slate-500">Output type</p>
+                <p className="mt-1 text-sm font-semibold text-white">{outputType}</p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Sparse quality</p>
+                <p className="mt-1 text-sm font-semibold text-white">{sparseQualityLabel}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Dense availability</p>
+                <p className="mt-1 text-sm font-semibold text-white">{denseLikelyUnavailable ? "Unavailable with current COLMAP" : denseReady ? "Available to try" : "Not ready"}</p>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Current output</p>
                 <p className="mt-1 text-sm font-semibold text-white">{outputType}</p>
               </div>
             </div>
@@ -284,6 +306,26 @@ export default function ViewerPage() {
                   <p className="mt-1 text-sm font-semibold text-white">{denseRecommendedPath}</p>
                 </div>
               </div>
+              {(denseReadiness?.reasons ?? []).length > 0 && (
+                <div className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3">
+                  <p className="text-xs font-semibold text-slate-300">Readiness notes</p>
+                  <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                    {(denseReadiness?.reasons ?? []).map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {(reconstruction?.lowRegistrationRecommendations ?? []).length > 0 && (
+                <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+                  <p className="text-xs font-semibold text-amber-100">Capture recommendations</p>
+                  <ul className="mt-2 space-y-1 text-xs text-amber-100/80">
+                    {(reconstruction?.lowRegistrationRecommendations ?? []).map((recommendation) => (
+                      <li key={recommendation}>{recommendation}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             {showSparseAction && (
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-4">
@@ -295,7 +337,7 @@ export default function ViewerPage() {
                     <div>
                       <p className="text-sm font-semibold text-white">Ready for sparse reconstruction</p>
                       <p className="mt-1 text-xs text-slate-400">
-                        Run COLMAP to replace the procedural fallback with a sparse point cloud.
+                        Run COLMAP to generate a real sparse point cloud preview.
                       </p>
                     </div>
                   </div>
@@ -332,6 +374,23 @@ export default function ViewerPage() {
                 )}
               </div>
             )}
+            {sparseStatus === "Sparse Reconstruction Complete" && denseStatus !== "Dense Reconstruction Complete" && (denseLikelyUnavailable || !denseReady) && (
+              <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-4">
+                <p className="text-sm font-semibold text-amber-100">Dense reconstruction is not recommended for this project yet</p>
+                <p className="mt-1 text-sm text-amber-100/85">
+                  {denseLikelyUnavailable
+                    ? "Your current COLMAP build appears to be without CUDA. Dense reconstruction may fail or be unavailable."
+                    : "Sparse reconstruction exists, but registration quality is too weak for a reliable dense run."}
+                </p>
+                <button
+                  disabled={denseReconstructing || denseLikelyUnavailable || !denseReady}
+                  onClick={onRunDenseReconstruction}
+                  className="mt-3 rounded-md border border-amber-300/30 px-4 py-2 text-sm font-semibold text-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+                </button>
+              </div>
+            )}
             {reconstructing && (
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-sm text-cyan-100">
                 Running COLMAP sparse reconstruction...
@@ -359,14 +418,17 @@ export default function ViewerPage() {
                   <p className="mt-2 text-xs text-red-100/80">Likely causes: {(reconstruction?.denseLikelyCauses ?? []).join(", ")}.</p>
                 )}
                 {denseLogEntries.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {denseLogEntries.map(([name, preview]) => (
-                      <div key={name} className="rounded-md border border-red-200/10 bg-slate-950/70 p-3">
-                        <p className="text-xs font-semibold uppercase text-red-100/80">{name}</p>
-                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-5 text-red-50/80">{preview}</pre>
-                      </div>
-                    ))}
-                  </div>
+                  <details className="mt-3 rounded-md border border-red-200/10 bg-slate-950/70 p-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-red-100/80">Technical dense logs</summary>
+                    <div className="mt-3 space-y-2">
+                      {denseLogEntries.map(([name, preview]) => (
+                        <div key={name} className="rounded-md border border-red-200/10 bg-slate-950/70 p-3">
+                          <p className="text-xs font-semibold uppercase text-red-100/80">{name}</p>
+                          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-5 text-red-50/80">{preview}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
                 )}
                 {reconstruction?.detectedSparseModelPath && (
                   <p className="mt-2 text-xs text-red-100/80">Sparse model path: {reconstruction.detectedSparseModelPath}</p>
@@ -468,13 +530,12 @@ export default function ViewerPage() {
                     showReference ? "border-brand bg-brand/10 text-white" : "border-white/10 text-slate-300 hover:bg-white/10"
                   }`}
                 >
-                  {showReference ? "Hide prototype reference" : "Show prototype floor/grid reference"}
+                  {showReference ? "Hide floor/grid reference" : "Show floor/grid reference"}
                 </button>
               </div>
             </div>
           )}
           <ViewerScene
-            modelUrl={modelUrl}
             pointCloud={activePointCloud}
             sceneAnalysis={activeSceneAnalysis}
             pointSize={pointSize}

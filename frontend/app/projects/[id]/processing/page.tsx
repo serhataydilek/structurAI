@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, runDenseReconstruction, runSparseReconstruction } from "@/lib/api";
-import type { CaptureSummary, Diagnostics, FramePreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary } from "@/lib/types";
+import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, runDenseReconstruction, runSparseReconstruction, startProcessing } from "@/lib/api";
+import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary } from "@/lib/types";
 import { AlertTriangle, Check, Cpu, ImageIcon, Loader2 } from "lucide-react";
 
 export default function ProcessingPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [status, setStatus] = useState<ProcessingStatus | null>(null);
   const [summary, setSummary] = useState<CaptureSummary | null>(null);
@@ -21,12 +22,48 @@ export default function ProcessingPage() {
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
   const [matchingMode, setMatchingMode] = useState<ReconstructionMatchingMode>("Auto");
+  const [autoProcessing, setAutoProcessing] = useState(false);
+  const [largeFrame, setLargeFrame] = useState<FramePreview | null>(null);
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
   }, [params.id]);
+
+  useEffect(() => {
+    if (searchParams.get("autostart") !== "1") return;
+    let active = true;
+    setAutoProcessing(true);
+    setStatus({
+      projectId: params.id,
+      status: "Processing",
+      progress: 20,
+      currentStep: "Extracting frames",
+      steps: ["Upload complete", "Extracting frames", "Analyzing capture quality", "Preparing reconstruction workspace", "Ready for sparse reconstruction"],
+      workspacePrepared: false,
+      extractedFrameCount: 0,
+      selectedFpsMode: (searchParams.get("fps") as ExtractionFpsMode) ?? "Balanced",
+      extractionFps: 2,
+      warnings: [],
+      readinessLabel: "Poor Capture"
+    });
+    startProcessing(params.id, { extractionFpsMode: (searchParams.get("fps") as ExtractionFpsMode) ?? "Balanced" })
+      .then((next) => {
+        if (!active) return;
+        setStatus(next);
+        getCaptureSummary(params.id).then(setSummary).catch(() => setSummary(null));
+        getFrames(params.id).then(setFrames).catch(() => setFrames([]));
+        getProject(params.id).then(setProject).catch(() => undefined);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setAutoProcessing(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [params.id, searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -56,15 +93,19 @@ export default function ProcessingPage() {
   const denseLikelyUnavailable = denseLikelyAvailable === false;
   const sparseComplete = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Complete";
   const denseComplete = reconstruction?.denseStatus === "Dense Reconstruction Complete";
-  const canRunDense = sparseComplete && !denseComplete && colmapAvailable;
+  const denseReadiness = reconstruction?.denseReadiness;
+  const canRunDense = sparseComplete && !denseComplete && colmapAvailable && !denseLikelyUnavailable && (denseReadiness?.ready ?? true);
   const denseRecommendedPath = denseLikelyUnavailable
-    ? "Install/use a CUDA-enabled COLMAP build"
+    ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
     : !sparseComplete
       ? "Continue with sparse preview"
       : reconstruction?.denseStatus === "Dense Reconstruction Failed"
         ? "Use a visual preview pipeline such as Gaussian Splatting"
         : "Retry dense reconstruction with better capture";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
+  const selectedFrames = frames.length > 0
+    ? [frames[0], frames[Math.floor(frames.length / 2)], frames[frames.length - 1]].filter((frame, index, all) => frame && all.findIndex((item) => item.filename === frame.filename) === index)
+    : [];
 
   async function onRunSparseReconstruction() {
     setReconstructing(true);
@@ -127,11 +168,11 @@ export default function ProcessingPage() {
 
           <div className="mt-8 grid gap-3">
             {(status?.steps ?? [
-              "Upload received",
+              "Upload complete",
               "Extracting frames",
+              "Analyzing capture quality",
               "Preparing reconstruction workspace",
-              "Capture analysis complete",
-              "Ready for reconstruction"
+              "Ready for sparse reconstruction"
             ]).map((step, index, steps) => {
               const threshold = Math.round(((index + 1) / steps.length) * 100);
               const complete = progress >= threshold || status?.status === "Ready";
@@ -155,6 +196,11 @@ export default function ProcessingPage() {
               <Link href={`/projects/${params.id}/report`} className="inline-flex rounded-md border border-white/10 px-5 py-3 font-semibold text-slate-100 hover:bg-white/10">
                 View Capture Report
               </Link>
+            </div>
+          )}
+          {(autoProcessing || status?.status === "Processing") && (
+            <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-sm text-cyan-100">
+              Upload complete. Extracting full reconstruction frames and generating preview thumbnails...
             </div>
           )}
         </div>
@@ -284,6 +330,26 @@ export default function ProcessingPage() {
               <p className="mt-2 text-sm font-semibold text-white">{reconstruction?.matchingModeUsed ?? "Not Started"}</p>
             </div>
           </div>
+          {reconstruction?.sparsePointCloudAvailable && (
+            <div className="mt-5 grid gap-4 md:grid-cols-4">
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Registered images</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{reconstruction.registeredImageCount ?? 0}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Registration ratio</p>
+                <p className="mt-2 text-sm font-semibold text-white">{Math.round((reconstruction.registrationRatio ?? 0) * 100)}%</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Sparse quality</p>
+                <p className="mt-2 text-sm font-semibold text-white">{reconstruction.sparseQualityLabel ?? "Poor Sparse Reconstruction"}</p>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                <p className="text-xs text-slate-500">Sparse points</p>
+                <p className="mt-2 text-2xl font-semibold text-white">{reconstruction.sparsePointCount ?? 0}</p>
+              </div>
+            </div>
+          )}
 
           {!colmapAvailable && (
             <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
@@ -349,7 +415,7 @@ export default function ProcessingPage() {
           </div>
 
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-            {denseLikelyUnavailable ? "Your current COLMAP build appears to be without CUDA. Dense reconstruction may fail or be unavailable." : "Dense reconstruction can take much longer than sparse reconstruction, especially without CUDA."}
+            {denseLikelyUnavailable ? "Dense reconstruction is unavailable with the current COLMAP build. Sparse reconstruction works, but dense stereo requires a CUDA-enabled COLMAP build." : "Dense reconstruction can take much longer than sparse reconstruction, especially without CUDA."}
           </div>
 
           <div className="mt-5 rounded-md border border-white/10 bg-slate-950/60 p-4">
@@ -376,6 +442,9 @@ export default function ProcessingPage() {
                 <p className="mt-1 text-sm font-semibold text-white">{denseRecommendedPath}</p>
               </div>
             </div>
+            {(denseReadiness?.reasons ?? []).length > 0 && (
+              <p className="mt-3 text-xs text-amber-100">Dense reconstruction is not recommended yet: {denseReadiness?.reasons.join(", ")}.</p>
+            )}
           </div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-4">
@@ -410,14 +479,17 @@ export default function ProcessingPage() {
                 <p className="mt-2 text-xs text-red-100/80">Likely causes: {(reconstruction?.denseLikelyCauses ?? []).join(", ")}.</p>
               )}
               {denseLogEntries.length > 0 && (
-                <div className="mt-3 space-y-2">
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-red-100/80">Technical details</summary>
+                  <div className="mt-2 space-y-2">
                   {denseLogEntries.map(([name, preview]) => (
                     <div key={name} className="rounded-md border border-red-200/10 bg-slate-950/70 p-3">
                       <p className="text-xs font-semibold uppercase text-red-100/80">{name}</p>
                       <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-xs leading-5 text-red-50/80">{preview}</pre>
                     </div>
                   ))}
-                </div>
+                  </div>
+                </details>
               )}
               {reconstruction?.detectedSparseModelPath && (
                 <p className="mt-2 text-xs text-red-100/80">Sparse model path: {reconstruction.detectedSparseModelPath}</p>
@@ -438,7 +510,7 @@ export default function ProcessingPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-white">Capture Review</h2>
-              <p className="mt-1 text-sm text-slate-400">Extracted frame thumbnails from the uploaded capture.</p>
+              <p className="mt-1 text-sm text-slate-400">Preview thumbnails from the uploaded capture. Reconstruction uses the full extracted frames.</p>
             </div>
             <span className="text-sm text-slate-400">{frames.length} frame(s)</span>
           </div>
@@ -448,16 +520,42 @@ export default function ProcessingPage() {
               No extracted frames are available yet.
             </div>
           ) : (
+            <>
+            <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
+              Preview thumbnails are compressed for speed. Reconstruction uses the full extracted frames.
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {selectedFrames.map((frame, index) => (
+                <button key={`${frame.filename}-${index}`} type="button" onClick={() => setLargeFrame(frame)} className="overflow-hidden rounded-md border border-white/10 bg-slate-950 text-left">
+                  <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-36 w-full object-cover" />
+                  <p className="px-2 py-2 text-xs text-slate-300">{index === 0 ? "First frame" : index === 1 ? "Middle frame" : "Last frame"}</p>
+                </button>
+              ))}
+            </div>
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
               {frames.slice(0, 12).map((frame) => (
                 <div key={frame.filename} className="overflow-hidden rounded-md border border-white/10 bg-slate-950">
-                  <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-28 w-full object-cover" />
+                  <button type="button" onClick={() => setLargeFrame(frame)} className="block w-full">
+                    <img src={`${API_BASE}${frame.thumbnailUrl}`} alt={frame.filename} className="h-28 w-full object-cover" />
+                  </button>
                   <p className="truncate px-2 py-2 text-xs text-slate-400">{frame.filename}</p>
                 </div>
               ))}
             </div>
+            </>
           )}
         </section>
+        {largeFrame && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6" onClick={() => setLargeFrame(null)}>
+            <div className="max-h-full max-w-5xl overflow-hidden rounded-lg border border-white/10 bg-slate-950" onClick={(event) => event.stopPropagation()}>
+              <img src={`${API_BASE}${largeFrame.frameUrl}`} alt={largeFrame.filename} className="max-h-[80vh] w-full object-contain" />
+              <div className="flex items-center justify-between px-4 py-3 text-sm text-slate-300">
+                <span>{largeFrame.filename} full extracted reconstruction frame</span>
+                <button type="button" onClick={() => setLargeFrame(null)} className="rounded-md border border-white/10 px-3 py-1.5 hover:bg-white/10">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppShell>
   );

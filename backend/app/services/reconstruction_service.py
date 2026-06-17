@@ -707,12 +707,12 @@ def _next_action(sparse_status: str, dense_status: str, dense_support_missing: b
         return "Run sparse reconstruction"
     if sparse_status == "Sparse Reconstruction Failed":
         return "Improve capture quality and rerun sparse reconstruction"
+    if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
+        return "Run dense reconstruction"
     if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
         return "Improve capture and rerun sparse reconstruction"
     if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
         return "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
-    if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
-        return "Run dense reconstruction"
     return "Run sparse reconstruction"
 
 
