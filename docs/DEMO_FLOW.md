@@ -7,14 +7,14 @@ Use this flow for a portfolio or GitHub demo of Structura AI v0.1.
 Backend:
 
 ```powershell
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\backend
+cd backend
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Frontend:
 
 ```powershell
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\frontend
+cd frontend
 npm run dev
 ```
 
@@ -32,6 +32,12 @@ Open `http://localhost:3000`.
 8. Align the point cloud if needed and save the orientation for the attempt.
 9. Enable `Presentation mode`.
 10. Open the report.
+11. Capture or review screenshots in `docs/screenshots/`:
+    - `dashboard.png`
+    - `project-overview.png`
+    - `processing-summary.png`
+    - `sparse-building-preview.png`
+    - `scan-report.png`
 
 ## Demo Talk Track
 

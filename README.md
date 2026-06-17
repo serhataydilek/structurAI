@@ -14,6 +14,27 @@ Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos 
 - Viewer mode: `Exterior / building scan`
 - Recommended demo view: `Presentation mode`
 
+## Demo Screenshots
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+![Processing Summary](docs/screenshots/processing-summary.png)
+
+![Sparse Building Preview](docs/screenshots/sparse-building-preview.png)
+
+![Scan Report](docs/screenshots/scan-report.png)
+
+## v0.1 Sparse Reconstruction Demo
+
+- Local photo/video capture pipeline
+- COLMAP sparse reconstruction
+- Best attempt tracking
+- Exterior building viewer
+- Cached scan reports
+- South Building result: `128/128 registered images, 85,105 sparse points`
+
+This version produces sparse point cloud previews, not dense meshes or textured 3D models yet.
+
 ## Features
 
 - Photo/video capture upload
@@ -46,7 +67,7 @@ Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos 
 ### Backend
 
 ```powershell
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\backend
+cd backend
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
@@ -59,7 +80,7 @@ Video frame extraction uses FFmpeg. The backend checks `ffmpeg` on PATH, then fa
 ### Frontend
 
 ```powershell
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\frontend
+cd frontend
 npm install
 npm run dev
 ```
@@ -111,10 +132,10 @@ Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/report"
 ## Build Checks
 
 ```powershell
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\backend
+cd backend
 .\.venv\Scripts\python -m compileall app
 
-cd C:\Users\serfu\OneDrive\Desktop\projects\structura\frontend
+cd ..\frontend
 npm run build
 ```
 

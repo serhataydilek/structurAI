@@ -4,11 +4,11 @@ Save real screenshots in `docs/screenshots/`. Do not add generated or fake recon
 
 Recommended portfolio screenshots:
 
-- Dashboard with project list and statuses
-- New scan or upload flow
-- Processing summary with extracted frames and reconstruction readiness
-- Sparse building preview in Presentation mode
-- Scan report showing `128/128 registered images` and `85k sparse points`
+- `dashboard.png`: dashboard with project list and statuses
+- `project-overview.png`: South Building project overview or viewer summary
+- `processing-summary.png`: processing summary with extracted frames and reconstruction readiness
+- `sparse-building-preview.png`: sparse building preview in Presentation mode
+- `scan-report.png`: scan report showing `128/128 registered images` and `85k sparse points`
 - Diagnostics or Dense Readiness panel if it helps explain CUDA-aware dense handling
 
 Before taking screenshots:

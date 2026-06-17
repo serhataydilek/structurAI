@@ -12,6 +12,8 @@ Run this before presenting or tagging a portfolio demo build.
 - Presentation mode works.
 - Report loads quickly and shows cached summary data.
 - Report shows `128/128 registered images` and about `85k` sparse points for the South Building demo.
+- Screenshot files exist under `docs/screenshots/` and match the current UI.
+- README screenshot links point to existing files.
 - Failed or empty attempts are not presented as the main result.
 - Dense reconstruction is not described as available when diagnostics says COLMAP lacks CUDA.
 - No fake dense reconstruction claims remain.
