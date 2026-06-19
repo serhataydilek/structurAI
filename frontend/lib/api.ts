@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, PreviewMode, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform } from "./types";
+import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, PreviewMode, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -40,6 +40,10 @@ export function getProject(projectId: string) {
 
 export function getDiagnostics() {
   return request<Diagnostics>("/diagnostics");
+}
+
+export function getVisualPreviewDiagnostics() {
+  return request<VisualPreviewDiagnostics>("/visual-preview/diagnostics");
 }
 
 export function deleteProject(projectId: string) {
@@ -117,6 +121,44 @@ export function runDenseReconstruction(projectId: string) {
 
 export function getReconstructionSummary(projectId: string) {
   return request<ReconstructionSummary>(`/projects/${projectId}/reconstruction-summary`);
+}
+
+export function getVisualPreviewSummary(projectId: string) {
+  return request<VisualPreviewSummary>(`/projects/${projectId}/visual-preview-summary`);
+}
+
+export function prepareVisualPreview(projectId: string) {
+  return request<VisualPreviewSummary>(`/projects/${projectId}/visual-preview/prepare`, {
+    method: "POST"
+  });
+}
+
+export function trainVisualPreview(projectId: string, payload?: { visualPreviewId?: string; attemptId?: string; maxIterations?: number; trainingPreset?: VisualPreviewPreset; preset?: VisualPreviewPreset }) {
+  return request<VisualPreviewTrainingStatusResponse>(`/projects/${projectId}/visual-preview/train`, {
+    method: "POST",
+    body: JSON.stringify(payload ?? { trainingPreset: "demo" })
+  });
+}
+
+export function getVisualPreviewTrainingStatus(projectId: string) {
+  return request<VisualPreviewTrainingStatusResponse>(`/projects/${projectId}/visual-preview/training-status`);
+}
+
+export function exportVisualPreview(projectId: string, visualPreviewId?: string) {
+  return request<VisualPreviewTrainingStatusResponse>(`/projects/${projectId}/visual-preview/export`, {
+    method: "POST",
+    body: JSON.stringify({ visualPreviewId })
+  });
+}
+
+export function getVisualPreviewSplatMetadata(projectId: string, visualPreviewId?: string) {
+  const query = visualPreviewId ? `?visual_preview_id=${encodeURIComponent(visualPreviewId)}` : "";
+  return request<VisualPreviewSplatMetadata>(`/projects/${projectId}/visual-preview/splat-file/metadata${query}`);
+}
+
+export function visualPreviewSplatDownloadUrl(projectId: string, visualPreviewId?: string) {
+  const query = visualPreviewId ? `?visual_preview_id=${encodeURIComponent(visualPreviewId)}` : "";
+  return `${API_BASE}/projects/${projectId}/visual-preview/splat-file${query}`;
 }
 
 export function getPointCloud(projectId: string, maxPoints = 50000, attemptId?: string) {

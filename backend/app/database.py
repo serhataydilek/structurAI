@@ -150,6 +150,32 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS visual_preview_outputs (
+                visual_preview_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                attempt_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                preview_type TEXT NOT NULL,
+                source_attempt_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                output_path TEXT,
+                manifest_path TEXT,
+                training_status TEXT NOT NULL DEFAULT 'not_started',
+                export_status TEXT NOT NULL DEFAULT 'not_started',
+                training_started_at TEXT,
+                training_finished_at TEXT,
+                training_log_path TEXT,
+                export_log_path TEXT,
+                nerfstudio_config_path TEXT,
+                splat_output_path TEXT,
+                splat_output_size_bytes INTEGER,
+                viewer_asset_path TEXT,
+                error_message TEXT,
+                summary_json TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")
@@ -174,6 +200,16 @@ def init_db() -> None:
         _ensure_column(conn, "reconstruction_attempts", "selected_frame_folder", "TEXT")
         _ensure_column(conn, "reconstruction_attempts", "viewer_transform_json", "TEXT NOT NULL DEFAULT '{}'")
         _ensure_column(conn, "reconstruction_attempts", "viewer_preview_mode", "TEXT NOT NULL DEFAULT 'auto'")
+        _ensure_column(conn, "visual_preview_outputs", "training_status", "TEXT NOT NULL DEFAULT 'not_started'")
+        _ensure_column(conn, "visual_preview_outputs", "export_status", "TEXT NOT NULL DEFAULT 'not_started'")
+        _ensure_column(conn, "visual_preview_outputs", "training_started_at", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "training_finished_at", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "training_log_path", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "export_log_path", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "nerfstudio_config_path", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "splat_output_path", "TEXT")
+        _ensure_column(conn, "visual_preview_outputs", "splat_output_size_bytes", "INTEGER")
+        _ensure_column(conn, "visual_preview_outputs", "viewer_asset_path", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

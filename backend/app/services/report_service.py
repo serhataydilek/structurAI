@@ -5,7 +5,7 @@ from typing import Any
 
 from app.repositories import annotation_repository, capture_repository, media_repository, project_repository, reconstruction_repository
 from app.database import get_connection
-from app.services import reconstruction_service
+from app.services import reconstruction_service, visual_preview_service
 from app.services.processing_service import readiness_label
 
 
@@ -93,6 +93,38 @@ def _with_attempt_display_status(attempt: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _visual_preview_report_status(visual_preview_summary: dict[str, Any] | None) -> str:
+    preview = (visual_preview_summary or {}).get("visualPreview") or {}
+    if not preview:
+        return "Not prepared"
+    if preview.get("status") == "failed" or preview.get("trainingStatus") == "failed" or preview.get("exportStatus") == "failed":
+        return "Failed"
+    if preview.get("exportStatus") == "complete":
+        return "Export ready"
+    if preview.get("trainingStatus") == "complete":
+        return "Training complete"
+    if preview.get("trainingStatus") in {"queued", "running"}:
+        return "Training running"
+    if visual_preview_summary and visual_preview_summary.get("status") == "ready":
+        return "Manifest ready"
+    return "Not prepared"
+
+
+def _visual_preview_report_note(visual_preview_summary: dict[str, Any] | None) -> str:
+    status = _visual_preview_report_status(visual_preview_summary)
+    if status == "Export ready":
+        return "Gaussian Splat export is ready. In-browser splat rendering will be added next."
+    if status == "Training complete":
+        return "Nerfstudio Splatfacto training completed; export is available next."
+    if status == "Training running":
+        return "Nerfstudio Splatfacto training is running in the background."
+    if status == "Manifest ready":
+        return "Visual preview inputs prepared from the best sparse attempt."
+    if status == "Failed":
+        return "Visual preview training or export failed. Review logs and diagnostics."
+    return "Visual preview manifest has not been prepared."
+
+
 def _split_attempts(attempts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     successful: list[dict[str, Any]] = []
     failed_or_empty: list[dict[str, Any]] = []
@@ -136,6 +168,7 @@ def _cache_key(
     capture: dict[str, Any] | None,
     annotations: list[dict[str, Any]],
     reconstruction_summary: dict[str, Any] | None,
+    visual_preview_summary: dict[str, Any] | None,
     media_count: int,
 ) -> str:
     attempts = reconstruction_summary.get("reconstructionAttempts", []) if reconstruction_summary else []
@@ -181,6 +214,16 @@ def _cache_key(
             "denseLogs": (reconstruction_summary or {}).get("denseLogPreviewSummary"),
             "denseError": (reconstruction_summary or {}).get("denseErrorMessage"),
         },
+            "visualPreview": {
+            "status": (visual_preview_summary or {}).get("status"),
+            "visualPreviewId": (((visual_preview_summary or {}).get("visualPreview") or {}).get("visualPreviewId")),
+            "manifestPath": (((visual_preview_summary or {}).get("visualPreview") or {}).get("manifestPath")),
+            "sourceAttemptId": (((visual_preview_summary or {}).get("visualPreview") or {}).get("sourceAttemptId")),
+            "trainingStatus": (((visual_preview_summary or {}).get("visualPreview") or {}).get("trainingStatus")),
+            "exportStatus": (((visual_preview_summary or {}).get("visualPreview") or {}).get("exportStatus")),
+            "splatOutputPath": (((visual_preview_summary or {}).get("visualPreview") or {}).get("splatOutputPath")),
+            "readiness": (visual_preview_summary or {}).get("readiness"),
+        },
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
@@ -222,7 +265,8 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     capture = capture_repository.get_capture_metadata(project_id)
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
-    cache_key = _cache_key(project, capture, annotations, reconstruction_summary, len(media))
+    visual_preview = visual_preview_service.visual_preview_summary(project_id)
+    cache_key = _cache_key(project, capture, annotations, reconstruction_summary, visual_preview, len(media))
     cached = _get_cached_report(project_id, cache_key)
     if cached:
         cached["reportCacheStatus"] = "hit"
@@ -294,6 +338,11 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "displayedAttempt": displayed_attempt,
             "displayedAttemptRole": reconstruction_summary["displayedAttemptRole"] if reconstruction_summary else None,
             "denseReadiness": reconstruction_summary["denseReadiness"] if reconstruction_summary else {"ready": False, "recommended": False, "reasons": ["sparse reconstruction is not complete"]},
+            "visualPreviewStatus": visual_preview["status"] if visual_preview else "not_started",
+            "visualPreviewReadiness": visual_preview["readiness"] if visual_preview else {"ready": False, "recommended": False, "reasons": ["project not found"]},
+            "visualPreview": visual_preview["visualPreview"] if visual_preview else None,
+            "visualPreviewReportStatus": _visual_preview_report_status(visual_preview),
+            "visualPreviewReportNote": _visual_preview_report_note(visual_preview),
             "densePointCount": reconstruction_summary["densePointCount"] if reconstruction_summary else 0,
             "colmapAvailable": reconstruction_summary["colmapAvailable"] if reconstruction_summary else False,
             "colmapPath": reconstruction_summary["colmapPath"] if reconstruction_summary else None,
@@ -319,7 +368,11 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "nextStep": "Dense reconstruction / point cloud visualization",
         },
         "annotations": annotations,
-        "limitations": _limitations(reconstruction_summary, preview_mode),
+        "limitations": [
+            *_limitations(reconstruction_summary, preview_mode),
+            "Full Gaussian Splat rendering is not implemented in this version.",
+            "Visual preview is optimized for viewing, not measurement-grade geometry.",
+        ],
     }
     _store_cached_report(project_id, cache_key, report)
     report["reportCacheStatus"] = "miss"

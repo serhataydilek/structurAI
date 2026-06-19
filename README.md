@@ -35,6 +35,69 @@ Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos 
 
 This version produces sparse point cloud previews, not dense meshes or textured 3D models yet.
 
+## Roadmap
+
+- v0.1 Sparse reconstruction demo
+- v0.2 Visual Preview foundation
+- v0.2 Visual Preview training adapter with Nerfstudio Splatfacto
+- Planned: Dense geometric reconstruction
+- Planned: Reference vs Current comparison
+
+## v0.2 Visual Preview Training Adapter
+
+Visual Preview can prepare a Nerfstudio dataset from Structura's best COLMAP sparse attempt and launch Nerfstudio Splatfacto as an external training tool.
+
+- Requires Nerfstudio/Splatfacto installed outside Structura.
+- Uses Structura COLMAP sparse output and registered images.
+- Produces a Gaussian Splat export only when Nerfstudio training and export succeed.
+- It is not a dense mesh.
+- It is not used for progress measurement yet.
+- In-browser splat rendering is a later milestone.
+
+Optional environment variables:
+
+```powershell
+$env:NERFSTUDIO_PYTHON="C:\path\to\python.exe"
+$env:NERFSTUDIO_NS_TRAIN="C:\path\to\ns-train.exe"
+$env:NERFSTUDIO_NS_EXPORT="C:\path\to\ns-export.exe"
+```
+
+Windows setup helper:
+
+```powershell
+.\scripts\setup_nerfstudio_windows.ps1
+```
+
+On Windows, Splatfacto CUDA extension builds need the VS 2022 Build Tools C++ workload, CUDA 11.8 conda build packages, and a local CUDA 11.8 CUB header patch for the Windows SDK `small` macro collision. The setup helper applies the conda/package/header parts; install VS 2022 Build Tools first if `vcvars64.bat` is missing:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --silent --accept-package-agreements --accept-source-agreements
+```
+
+Known-good local paths after the helper installs Miniconda:
+
+```powershell
+$env:NERFSTUDIO_PYTHON="C:\Users\serfu\miniconda3\envs\nerfstudio\python.exe"
+$env:NERFSTUDIO_NS_TRAIN="C:\Users\serfu\miniconda3\envs\nerfstudio\Scripts\ns-train.exe"
+$env:NERFSTUDIO_NS_EXPORT="C:\Users\serfu\miniconda3\envs\nerfstudio\Scripts\ns-export.exe"
+```
+
+Visual Preview flow:
+
+1. Run a successful sparse reconstruction and keep the best attempt selected.
+2. Open Visual Preview and confirm diagnostics show Nerfstudio, `ns-train`, `ns-export`, and CUDA available.
+3. Prepare the visual preview manifest. Structura creates `nerfstudio_dataset/images/` and `nerfstudio_dataset/sparse/0/`.
+4. Train with Splatfacto from the Visual Preview page or API. Use `smoke` only to validate the pipeline, `demo` for portfolio screenshots, and `quality` when slower training is acceptable.
+5. Export Gaussian Splat. Structura only marks export complete when a `.ply` file is produced.
+6. Current limitation: browser Gaussian Splat rendering is pending; the exported `.ply` path and size are shown instead.
+
+Training presets:
+
+- `smoke`: 1 iteration, pipeline validation only.
+- `quick`: 1000 iterations, fast preview.
+- `demo`: 7000 iterations, recommended for meaningful portfolio screenshots.
+- `quality`: 30000 iterations, slower but better.
+
 ## Features
 
 - Photo/video capture upload
@@ -45,6 +108,8 @@ This version produces sparse point cloud previews, not dense meshes or textured 
 - Sparse reconstruction attempt tracking
 - Best attempt scoring and default selection
 - Sparse experiment sweep for comparing frame-selection strategies
+- Visual Preview manifest preparation from strong or usable sparse attempts
+- Nerfstudio Splatfacto training/export adapter for Visual Preview
 - Exterior/building sparse point cloud viewer
 - Manual viewer orientation save per attempt
 - Presentation mode for clean demo screenshots
@@ -55,6 +120,8 @@ This version produces sparse point cloud previews, not dense meshes or textured 
 ## Honest Limitations
 
 - Current output is a sparse point cloud preview.
+- Visual Preview training requires Nerfstudio. Gaussian Splat output is available only after training and export succeed.
+- In-browser Gaussian Splat rendering is not implemented yet.
 - It is not a dense mesh yet.
 - It is not a textured model yet.
 - Scale and orientation are arbitrary unless aligned manually in the viewer.
@@ -112,6 +179,13 @@ If diagnostics says COLMAP is installed `without CUDA`, sparse reconstruction ca
 10. Enable `Presentation mode`.
 11. Open the report.
 12. Explain the result: `128/128 registered images, 85k sparse points`.
+13. Open Visual Preview.
+14. Confirm Nerfstudio diagnostics are green.
+15. Prepare the South Building visual preview dataset from the best sparse attempt.
+16. Train Splatfacto with the `demo` preset, then export the Gaussian Splat `.ply`.
+17. Download `splat.ply` and open it in an external Gaussian Splat viewer such as SuperSplat or Polycam.
+
+The Visual Preview export is a real Nerfstudio/Splatfacto artifact. Structura does not render Gaussian Splats internally yet; the browser renderer is pending and no fake preview is shown.
 
 ## API Validation Commands
 
@@ -126,6 +200,11 @@ For a project:
 ```powershell
 Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/capture-summary"
 Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/reconstruction-summary"
+Invoke-RestMethod "http://127.0.0.1:8000/visual-preview/diagnostics"
+Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/visual-preview-summary"
+Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/visual-preview/prepare" -Method Post
+Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/visual-preview/training-status"
+Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/visual-preview/splat-file/metadata"
 Invoke-RestMethod "http://127.0.0.1:8000/projects/$($project.id)/report"
 ```
 

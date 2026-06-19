@@ -96,6 +96,11 @@ export type ExtractionFpsMode = "Fast" | "Balanced" | "Detailed";
 export type ReconstructionMatchingMode = "Auto" | "Video Sequential" | "Photo Exhaustive";
 export type FrameSelectionMode = "Balanced subset" | "All frames" | "Sharpest subset" | "Evenly spaced subset";
 export type PreviewMode = "auto" | "interior" | "exterior";
+export type VisualPreviewStatus = "not_started" | "preparing" | "ready" | "failed";
+export type VisualPreviewType = "gaussian_splat_placeholder" | "external_viewer" | "future_visual_preview";
+export type VisualPreviewTrainingStatus = "not_started" | "queued" | "running" | "complete" | "failed";
+export type VisualPreviewExportStatus = "not_started" | "running" | "complete" | "failed";
+export type VisualPreviewPreset = "smoke" | "quick" | "demo" | "quality";
 export type ViewerTransform = {
   rotationX: number;
   rotationY: number;
@@ -173,6 +178,11 @@ export type ReconstructionSummary = {
     recommended: boolean;
     reasons: string[];
   };
+  visualPreviewStatus?: VisualPreviewStatus;
+  visualPreviewReadiness?: VisualPreviewReadiness;
+  visualPreview?: VisualPreviewOutput | null;
+  visualPreviewReportStatus?: string;
+  visualPreviewReportNote?: string;
   denseRecommended?: boolean;
   selectedFpsMode?: ExtractionFpsMode;
   extractionFps?: number;
@@ -218,6 +228,112 @@ export type ReconstructionSummary = {
   recommendedFixes?: string[];
   recommendedNextAction?: string;
   nextStep: string;
+};
+
+export type VisualPreviewReadiness = {
+  ready: boolean;
+  recommended: boolean;
+  label: string;
+  reasons: string[];
+  checks: Array<{
+    key: string;
+    label: string;
+    passed: boolean;
+    detail: string;
+  }>;
+  registeredImageCount: number;
+  sparsePointCount: number;
+  sparseQualityLabel: string;
+  imageFolderPath?: string | null;
+  colmapModelPath?: string | null;
+};
+
+export type VisualPreviewOutput = {
+  visualPreviewId: string;
+  projectId: string;
+  attemptId: string;
+  status: VisualPreviewStatus;
+  previewType: VisualPreviewType;
+  sourceAttemptId: string;
+  createdAt: string;
+  updatedAt: string;
+  outputPath?: string | null;
+  manifestPath?: string | null;
+  trainingStatus: VisualPreviewTrainingStatus;
+  exportStatus: VisualPreviewExportStatus;
+  trainingStartedAt?: string | null;
+  trainingFinishedAt?: string | null;
+  trainingLogPath?: string | null;
+  exportLogPath?: string | null;
+  nerfstudioConfigPath?: string | null;
+  splatOutputPath?: string | null;
+  splatOutputSizeBytes?: number | null;
+  viewerAssetPath?: string | null;
+  errorMessage?: string | null;
+  trainingPreset?: VisualPreviewPreset | string | null;
+  maxIterations?: number | null;
+  summaryJson: Record<string, unknown>;
+};
+
+export type VisualPreviewSummary = {
+  projectId: string;
+  status: VisualPreviewStatus;
+  visualPreview?: VisualPreviewOutput | null;
+  readiness: VisualPreviewReadiness;
+  sourceAttempt?: ReconstructionAttempt | null;
+  nextStep: string;
+  limitations: string[];
+};
+
+export type VisualPreviewDiagnostics = {
+  nerfstudioAvailable: boolean;
+  nerfstudioPython?: string | null;
+  nsTrainPath?: string | null;
+  nsTrainFound?: boolean;
+  nsExportPath?: string | null;
+  nsExportFound?: boolean;
+  cudaLikelyAvailable: boolean | "unknown";
+  cudaAvailable?: boolean | "unknown";
+  torchCudaVersion?: string | null;
+  cudaDeviceName?: string | null;
+  outputDirectoryWritable: boolean;
+  warnings: string[];
+  errors?: string[];
+  recommendedSetupMessage: string;
+};
+
+export type VisualPreviewTrainingStatusResponse = {
+  projectId: string;
+  visualPreviewId?: string | null;
+  status: VisualPreviewStatus;
+  trainingStatus: VisualPreviewTrainingStatus;
+  exportStatus: VisualPreviewExportStatus;
+  trainingStartedAt?: string | null;
+  trainingFinishedAt?: string | null;
+  trainingLogPath?: string | null;
+  exportLogPath?: string | null;
+  recentTrainingLog: string;
+  recentExportLog: string;
+  nerfstudioConfigPath?: string | null;
+  splatOutputPath?: string | null;
+  splatOutputSizeBytes?: number | null;
+  viewerAssetPath?: string | null;
+  errorMessage?: string | null;
+  trainingPreset?: VisualPreviewPreset | string | null;
+  maxIterations?: number | null;
+  summaryJson: Record<string, unknown>;
+};
+
+export type VisualPreviewSplatMetadata = {
+  projectId: string;
+  visualPreviewId?: string | null;
+  exists: boolean;
+  fileName?: string | null;
+  fileSizeBytes?: number | null;
+  createdAt?: string | null;
+  modifiedAt?: string | null;
+  relativePath?: string | null;
+  downloadUrl?: string | null;
 };
 
 export type ReconstructionAttempt = {

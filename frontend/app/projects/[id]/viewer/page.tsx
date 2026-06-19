@@ -6,8 +6,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PointCloudColorMode, PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, listAnnotations, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, saveAttemptViewerTransform } from "@/lib/api";
-import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, PreviewMode, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt, ViewerTransform } from "@/lib/types";
+import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, getVisualPreviewSummary, getVisualPreviewTrainingStatus, listAnnotations, prepareVisualPreview, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, saveAttemptViewerTransform, trainVisualPreview } from "@/lib/api";
+import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, PreviewMode, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt, ViewerTransform, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "@/lib/types";
 import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
 
 const identityViewerTransform: ViewerTransform = {
@@ -38,14 +38,19 @@ export default function ViewerPage() {
   const [pointCloud, setPointCloud] = useState<PointCloudResponse | null>(null);
   const [sparsePointCloud, setSparsePointCloud] = useState<PointCloudResponse | null>(null);
   const [densePointCloud, setDensePointCloud] = useState<PointCloudResponse | null>(null);
+  const [visualPreview, setVisualPreview] = useState<VisualPreviewSummary | null>(null);
+  const [visualTraining, setVisualTraining] = useState<VisualPreviewTrainingStatusResponse | null>(null);
   const [sceneAnalysis, setSceneAnalysis] = useState<SceneAnalysis | null>(null);
   const [reconstructing, setReconstructing] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepResults, setSweepResults] = useState<SparseSweepAttempt[]>([]);
   const [denseReconstructing, setDenseReconstructing] = useState(false);
+  const [visualPreparing, setVisualPreparing] = useState(false);
   const [reconstructionError, setReconstructionError] = useState("");
   const [denseReconstructionError, setDenseReconstructionError] = useState("");
+  const [visualPreviewError, setVisualPreviewError] = useState("");
   const [viewerMode, setViewerMode] = useState<"auto" | "dense" | "sparse">("auto");
+  const [outputSelection, setOutputSelection] = useState<"sparse" | "visual" | "dense">("sparse");
   const [pointSize, setPointSize] = useState<PointCloudPointSize>("Medium");
   const [pointSizeValue, setPointSizeValue] = useState(0.045);
   const [pointOpacity, setPointOpacity] = useState(1);
@@ -75,8 +80,19 @@ export default function ViewerPage() {
     getCaptureSummary(params.id).then(setSummary).catch(() => setSummary(null));
     getFrames(params.id).then(setFrames).catch(() => setFrames([]));
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
+    getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => setVisualPreview(null));
+    getVisualPreviewTrainingStatus(params.id).then(setVisualTraining).catch(() => setVisualTraining(null));
     refreshReconstruction();
   }, [params.id]);
+
+  useEffect(() => {
+    if (visualTraining?.trainingStatus !== "queued" && visualTraining?.trainingStatus !== "running" && visualTraining?.exportStatus !== "running") return;
+    const timer = window.setTimeout(() => {
+      getVisualPreviewTrainingStatus(params.id).then(setVisualTraining).catch(() => undefined);
+      getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => undefined);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [params.id, visualTraining?.trainingStatus, visualTraining?.exportStatus, visualTraining?.recentTrainingLog]);
 
   async function refreshReconstruction() {
     try {
@@ -161,6 +177,37 @@ export default function ViewerPage() {
     }
   }
 
+  async function onPrepareVisualPreview() {
+    setVisualPreparing(true);
+    setVisualPreviewError("");
+    try {
+      const next = await prepareVisualPreview(params.id);
+      setVisualPreview(next);
+      setOutputSelection("visual");
+    } catch (error) {
+      setVisualPreviewError(error instanceof Error ? error.message : "Visual preview preparation failed");
+      getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => undefined);
+    } finally {
+      setVisualPreparing(false);
+    }
+  }
+
+  async function onTrainVisualPreview() {
+    setVisualPreparing(true);
+    setVisualPreviewError("");
+    try {
+      const next = await trainVisualPreview(params.id, { visualPreviewId: visualPreview?.visualPreview?.visualPreviewId, preset: "quick" });
+      setVisualTraining(next);
+      getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => undefined);
+      setOutputSelection("visual");
+    } catch (error) {
+      setVisualPreviewError(error instanceof Error ? error.message : "Visual preview training could not start");
+      getVisualPreviewTrainingStatus(params.id).then(setVisualTraining).catch(() => undefined);
+    } finally {
+      setVisualPreparing(false);
+    }
+  }
+
   async function onRunSparseSweep() {
     setSweeping(true);
     setReconstructionError("");
@@ -212,9 +259,16 @@ export default function ViewerPage() {
     : sparseStatus !== "Sparse Reconstruction Complete"
       ? "Continue with sparse preview"
       : denseStatus === "Dense Reconstruction Failed"
-        ? "Use a visual preview pipeline such as Gaussian Splatting"
+        ? "Prepare visual preview inputs for the planned Gaussian Splat integration"
         : "Retry dense reconstruction with better capture";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
+  const visualReadiness = visualPreview?.readiness;
+  const visualManifest = visualPreview?.visualPreview;
+  const visualReady = visualReadiness?.ready ?? false;
+  const visualStatus = visualPreview?.status ?? "not_started";
+  const visualManifestReady = visualStatus === "ready" && Boolean(visualManifest);
+  const visualTrainingStatus = visualTraining?.trainingStatus ?? visualManifest?.trainingStatus ?? "not_started";
+  const visualExportStatus = visualTraining?.exportStatus ?? visualManifest?.exportStatus ?? "not_started";
   const selectedPointCloud = viewerMode === "dense"
     ? densePointCloud
     : viewerMode === "sparse"
@@ -365,6 +419,11 @@ export default function ViewerPage() {
   const renderCameraPath = activePreviewMode === "exterior" ? debugCameraPath && showCameraPath && !presentationMode : showCameraPath && !presentationMode;
   const renderReference = presentationMode ? false : showReference;
   const renderBoundingBox = presentationMode ? showBoundingBox : showBoundingBox;
+  const selectedOutputDescription = outputSelection === "visual"
+    ? "Visual Preview prepares inputs for a future browser-viewable visual reconstruction. Full Gaussian Splat rendering is not implemented in this version."
+    : outputSelection === "dense"
+      ? "Dense / geometric model is a later output path and depends on a CUDA-capable dense reconstruction workflow."
+      : explanation;
 
   return (
     <AppShell>
@@ -375,12 +434,70 @@ export default function ViewerPage() {
               <p className="text-sm text-brand">Future Inspection Viewer</p>
               <h1 className="mt-2 text-3xl font-semibold text-white">{title}</h1>
               <p className="mt-2 text-sm text-slate-400">
-                {explanation}
+                {selectedOutputDescription}
               </p>
             </div>
             <Link href={`/projects/${params.id}/report`} className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2.5 font-semibold text-ink hover:bg-cyan-200">
               <FileText size={17} /> Export Report
             </Link>
+          </div>
+          <div className="glass-panel mb-5 rounded-lg p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-white">Outputs</p>
+                <p className="mt-1 text-xs text-slate-400">Sparse, visual, and dense outputs are tracked separately.</p>
+              </div>
+              <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+                Visual Preview page
+              </Link>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {([
+                {
+                  key: "sparse",
+                  title: "Sparse point cloud preview",
+                  status: sparseStatus,
+                  readiness: hasSparsePointCloud ? "Ready" : sparseNotStarted ? "Not prepared" : "Check reconstruction",
+                  body: "Fast COLMAP point cloud for alignment, coverage, and demo inspection.",
+                  limitation: "Sparse points only; not a dense mesh."
+                },
+                {
+                  key: "visual",
+                  title: "Visual reconstruction preview",
+                  status: visualManifestReady ? "Manifest ready" : visualStatus === "failed" ? "Failed" : "Not prepared",
+                  readiness: visualExportStatus === "complete" ? "Export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Training running" : visualReadiness?.label ?? "Not evaluated",
+                  body: "Intended for a more realistic browser-viewable scene.",
+                  limitation: "Not a measurement-grade mesh; Gaussian Splat rendering is not implemented yet."
+                },
+                {
+                  key: "dense",
+                  title: "Dense / geometric model",
+                  status: denseStatus,
+                  readiness: denseLikelyUnavailable ? "Not recommended with current COLMAP" : denseReady ? "Ready to try" : "Not ready",
+                  body: "Later path for denser geometry and model export.",
+                  limitation: "Current build may lack CUDA; mesh/GLB export is not implemented."
+                }
+              ] as const).map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => {
+                    setOutputSelection(item.key);
+                    if (item.key === "sparse") setViewerMode("sparse");
+                    if (item.key === "dense") setViewerMode("dense");
+                  }}
+                  className={`rounded-md border p-4 text-left transition ${outputSelection === item.key ? "border-brand bg-brand/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}
+                >
+                  <p className="text-sm font-semibold text-white">{item.title}</p>
+                  <p className="mt-2 text-xs text-slate-500">Status</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-100">{item.status}</p>
+                  <p className="mt-2 text-xs text-slate-500">Readiness</p>
+                  <p className="mt-1 text-xs text-slate-300">{item.readiness}</p>
+                  <p className="mt-3 text-xs leading-5 text-slate-400">{item.body}</p>
+                  <p className="mt-2 text-xs leading-5 text-amber-100/85">{item.limitation}</p>
+                </button>
+              ))}
+            </div>
           </div>
           <div className="glass-panel mb-5 rounded-lg p-5">
             <div className="grid gap-4 md:grid-cols-6">
@@ -814,6 +931,57 @@ export default function ViewerPage() {
                 ))}
               </div>
             )}
+            {outputSelection === "visual" && (
+              <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-4">
+                {visualManifestReady ? (
+                  <div>
+                    <p className="text-sm font-semibold text-white">{visualExportStatus === "complete" ? "Gaussian Splat export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Visual Preview training running" : visualTrainingStatus === "complete" ? "Visual Preview training complete" : "Visual Preview manifest ready"}</p>
+                    <p className="mt-1 text-sm text-cyan-50/85">Prepared from attempt {visualManifest?.sourceAttemptId} with {visualReadiness?.registeredImageCount ?? 0} registered images and {visualReadiness?.sparsePointCount ?? 0} sparse points.</p>
+                    <p className="mt-2 break-all text-xs text-cyan-50/70">{visualManifest?.manifestPath}</p>
+                    {visualTraining?.recentTrainingLog && (
+                      <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-white/10 bg-black/30 p-3 text-xs text-slate-300">{visualTraining.recentTrainingLog}</pre>
+                    )}
+                    {visualTraining?.splatOutputPath && (
+                      <p className="mt-3 break-all text-sm text-emerald-100">Output: {visualTraining.splatOutputPath}</p>
+                    )}
+                    {visualExportStatus === "complete" && (
+                      <p className="mt-2 text-sm text-amber-100">In-browser splat rendering will be added next.</p>
+                    )}
+                    {visualTrainingStatus === "not_started" && (
+                      <button
+                        type="button"
+                        disabled={visualPreparing}
+                        onClick={onTrainVisualPreview}
+                        className="mt-4 rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {visualPreparing ? "Starting..." : "Train Visual Preview"}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Prepare Visual Preview from best sparse attempt</p>
+                      <p className="mt-1 text-xs text-slate-300">
+                        This creates a manifest for future visual reconstruction training. It does not render or train Gaussian Splat output.
+                      </p>
+                      {(visualReadiness?.reasons ?? []).length > 0 && (
+                        <p className="mt-2 text-xs text-amber-100">Not recommended yet: {visualReadiness?.reasons.join(" ")}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!visualReady || visualPreparing}
+                      onClick={onPrepareVisualPreview}
+                      className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {visualPreparing ? "Preparing..." : "Prepare Visual Preview"}
+                    </button>
+                  </div>
+                )}
+                {visualPreviewError && <p className="mt-3 text-sm text-red-100">{visualPreviewError}</p>}
+              </div>
+            )}
             {frames.length > 0 && (
               <div className="mt-4">
                 <div className="grid gap-3 md:grid-cols-3">
@@ -1023,30 +1191,46 @@ export default function ViewerPage() {
               </div>
             </div>
           )}
-          <ViewerScene
-            pointCloud={activePointCloud}
-            sceneAnalysis={activeSceneAnalysis}
-            pointSize={pointSize}
-            pointSizeValue={pointSizeValue}
-            pointOpacity={pointOpacity}
-            colorMode={colorMode}
-            showSparsePoints={showSparsePoints}
-            showRoomBounds={activePreviewMode === "interior" && showRoomBounds}
-            showEstimatedFloor={activePreviewMode === "interior" && showEstimatedFloor}
-            showCameraPath={renderCameraPath}
-            showBoundingBox={renderBoundingBox}
-            showReference={renderReference}
-            showAxisGizmo={activePreviewMode === "exterior" && debugCameraPath && !presentationMode}
-            viewerTransform={viewerTransform}
-            previewMode={activePreviewMode}
-            presentationMode={presentationMode}
-            cameraPathPointSize={cameraPathPointSize}
-            cameraPathPointOpacity={cameraPathPointOpacity}
-            cameraPathLineOpacity={cameraPathLineOpacity}
-            showCameraSpheres={showCameraSpheres}
-            outputLabel={outputType}
-            resetKey={viewerResetKey}
-          />
+          {outputSelection === "visual" ? (
+            <div className="flex h-[540px] items-center justify-center rounded-lg border border-white/10 bg-slate-950 p-8 text-center shadow-glow">
+              <div>
+                <p className="text-xl font-semibold text-white">{visualExportStatus === "complete" ? "Gaussian Splat export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Visual Preview training running" : visualManifestReady ? "Visual Preview manifest ready" : "Visual Preview not prepared"}</p>
+                <p className="mt-2 max-w-lg text-sm leading-6 text-slate-400">
+                  {visualExportStatus === "complete"
+                    ? `Exported output: ${visualTraining?.splatOutputPath ?? visualManifest?.splatOutputPath ?? "available in project storage"}.`
+                    : visualManifestReady
+                    ? `Inputs prepared from the best sparse attempt: ${visualReadiness?.registeredImageCount ?? 0} registered images, ${visualReadiness?.sparsePointCount ?? 0} sparse points.`
+                    : "Prepare Visual Preview from the best sparse attempt when readiness checks pass."}
+                </p>
+                <p className="mt-3 text-sm text-amber-100">In-browser splat rendering will be added next.</p>
+              </div>
+            </div>
+          ) : (
+            <ViewerScene
+              pointCloud={activePointCloud}
+              sceneAnalysis={activeSceneAnalysis}
+              pointSize={pointSize}
+              pointSizeValue={pointSizeValue}
+              pointOpacity={pointOpacity}
+              colorMode={colorMode}
+              showSparsePoints={showSparsePoints}
+              showRoomBounds={activePreviewMode === "interior" && showRoomBounds}
+              showEstimatedFloor={activePreviewMode === "interior" && showEstimatedFloor}
+              showCameraPath={renderCameraPath}
+              showBoundingBox={renderBoundingBox}
+              showReference={renderReference}
+              showAxisGizmo={activePreviewMode === "exterior" && debugCameraPath && !presentationMode}
+              viewerTransform={viewerTransform}
+              previewMode={activePreviewMode}
+              presentationMode={presentationMode}
+              cameraPathPointSize={cameraPathPointSize}
+              cameraPathPointOpacity={cameraPathPointOpacity}
+              cameraPathLineOpacity={cameraPathLineOpacity}
+              showCameraSpheres={showCameraSpheres}
+              outputLabel={outputSelection === "dense" ? "Dense / geometric model" : outputType}
+              resetKey={viewerResetKey}
+            />
+          )}
         </section>
 
         <aside className="glass-panel rounded-lg p-5">

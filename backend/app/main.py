@@ -4,13 +4,14 @@ import shutil
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
 from app.repositories import annotation_repository, media_repository, project_repository
-from app.services import processing_service, reconstruction_service, report_service
+from app.services import processing_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -67,6 +68,18 @@ class ViewerTransformPayload(BaseModel):
     previewMode: str = "auto"
 
 
+class VisualPreviewTrainPayload(BaseModel):
+    visualPreviewId: str | None = None
+    attemptId: str | None = None
+    maxIterations: int | None = Field(default=None, ge=1, le=100000)
+    trainingPreset: str | None = None
+    preset: str | None = None
+
+
+class VisualPreviewExportPayload(BaseModel):
+    visualPreviewId: str | None = None
+
+
 def _is_dev_mode() -> bool:
     return os.getenv("STRUCTURA_ENV", "development").lower() in {"local", "dev", "development", "test"}
 
@@ -104,6 +117,11 @@ def diagnostics() -> dict:
         "denseReconstructionLikelyAvailable": colmap["denseReconstructionLikelyAvailable"],
         "colmap": colmap,
     }
+
+
+@app.get("/visual-preview/diagnostics")
+def visual_preview_diagnostics() -> dict:
+    return visual_preview_service.diagnostics()
 
 
 @app.get("/projects")
@@ -277,6 +295,81 @@ def get_reconstruction_summary(project_id: str) -> dict:
     if not summary:
         raise HTTPException(status_code=404, detail="Project not found")
     return summary
+
+
+@app.get("/projects/{project_id}/visual-preview-summary")
+def get_visual_preview_summary(project_id: str) -> dict:
+    summary = visual_preview_service.visual_preview_summary(project_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return summary
+
+
+@app.post("/projects/{project_id}/visual-preview/prepare")
+def prepare_visual_preview(project_id: str) -> dict:
+    try:
+        return visual_preview_service.prepare_visual_preview(project_id)
+    except visual_preview_service.VisualPreviewError as exc:
+        status_code = 404 if str(exc) == "Project not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.post("/projects/{project_id}/visual-preview/train")
+def train_visual_preview(project_id: str, payload: VisualPreviewTrainPayload | None = None) -> dict:
+    try:
+        return visual_preview_service.train_visual_preview(
+            project_id,
+            visual_preview_id=payload.visualPreviewId if payload else None,
+            attempt_id=payload.attemptId if payload else None,
+            max_iterations=payload.maxIterations if payload else None,
+            preset=(payload.trainingPreset or payload.preset) if payload else visual_preview_service.DEFAULT_TRAINING_PRESET,
+        )
+    except visual_preview_service.VisualPreviewError as exc:
+        status_code = 404 if str(exc) == "Project not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/visual-preview/training-status")
+def get_visual_preview_training_status(project_id: str) -> dict:
+    try:
+        return visual_preview_service.training_status(project_id)
+    except visual_preview_service.VisualPreviewError as exc:
+        status_code = 404 if str(exc) == "Project not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.post("/projects/{project_id}/visual-preview/export")
+def export_visual_preview(project_id: str, payload: VisualPreviewExportPayload | None = None) -> dict:
+    try:
+        return visual_preview_service.export_visual_preview(
+            project_id,
+            visual_preview_id=payload.visualPreviewId if payload else None,
+        )
+    except visual_preview_service.VisualPreviewError as exc:
+        status_code = 404 if str(exc) == "Project not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/visual-preview/splat-file/metadata")
+def get_visual_preview_splat_metadata(project_id: str, visual_preview_id: str | None = None) -> dict:
+    try:
+        return visual_preview_service.exported_splat_metadata(project_id, visual_preview_id)
+    except visual_preview_service.VisualPreviewError as exc:
+        status_code = 404 if str(exc) == "Project not found" or "manifest not found" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/visual-preview/splat-file")
+def download_visual_preview_splat(project_id: str, visual_preview_id: str | None = None) -> FileResponse:
+    try:
+        splat_path = visual_preview_service.exported_splat_file(project_id, visual_preview_id)
+    except visual_preview_service.VisualPreviewError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(
+        path=splat_path,
+        media_type="application/octet-stream",
+        filename=splat_path.name,
+    )
 
 
 @app.get("/projects/{project_id}/point-cloud")

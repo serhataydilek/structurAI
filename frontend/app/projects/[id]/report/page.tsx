@@ -24,6 +24,8 @@ export default function ReportPage() {
   const selectedFrameCount = report?.reconstructionMetadata?.selectedFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0;
   const registeredImageCount = report?.reconstructionMetadata?.registeredImageCount ?? 0;
   const selectedRegistrationPercent = Math.round((report?.reconstructionMetadata?.selectedRegistrationRatio ?? report?.reconstructionMetadata?.registrationRatio ?? 0) * 100);
+  const visualPreview = report?.reconstructionMetadata?.visualPreview;
+  const visualReadiness = report?.reconstructionMetadata?.visualPreviewReadiness;
   const photoSetRecommendations = [
     "Take 40-80 sharp photos.",
     "Keep 60-70% overlap between photos.",
@@ -207,6 +209,35 @@ export default function ReportPage() {
                 <p className="text-xs text-slate-500">Sparse quality</p>
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseQualityLabel ?? "Not Started"}</p>
               </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-slate-500">Visual Preview</p>
+                  <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.visualPreviewReportStatus ?? "Not prepared"}</p>
+                  <p className="mt-2 text-sm text-slate-400">{report?.reconstructionMetadata?.visualPreviewReportNote ?? "Visual preview manifest has not been prepared."}</p>
+                </div>
+                <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+                  Open Visual Preview
+                </Link>
+              </div>
+              {visualPreview?.manifestPath && (
+                <p className="mt-3 break-all text-xs text-slate-500">Manifest: {visualPreview.manifestPath}</p>
+              )}
+              {visualPreview?.splatOutputPath && (
+                <p className="mt-3 break-all text-xs text-emerald-100">Exported output: {visualPreview.splatOutputPath}</p>
+              )}
+              <p className="mt-3 text-sm text-amber-100">Visual preview is optimized for viewing, not measurement-grade geometry.</p>
+              {(visualReadiness?.reasons ?? []).length > 0 && (
+                <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+                  <p className="text-xs font-semibold text-amber-100">Visual preview readiness notes</p>
+                  <ul className="mt-2 space-y-1 text-xs text-amber-100/80">
+                    {(visualReadiness?.reasons ?? []).map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, startProcessing } from "@/lib/api";
-import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, SparseSweepAttempt } from "@/lib/types";
+import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, getVisualPreviewSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, startProcessing } from "@/lib/api";
+import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, SparseSweepAttempt, VisualPreviewSummary } from "@/lib/types";
 import { AlertTriangle, Check, Cpu, ImageIcon, Loader2 } from "lucide-react";
 
 export default function ProcessingPage() {
@@ -17,6 +17,7 @@ export default function ProcessingPage() {
   const [frames, setFrames] = useState<FramePreview[]>([]);
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [reconstruction, setReconstruction] = useState<ReconstructionSummary | null>(null);
+  const [visualPreview, setVisualPreview] = useState<VisualPreviewSummary | null>(null);
   const [reconstructing, setReconstructing] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepResults, setSweepResults] = useState<SparseSweepAttempt[]>([]);
@@ -34,6 +35,7 @@ export default function ProcessingPage() {
     getProject(params.id).then(setProject).catch(() => setProject(null));
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
+    getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => setVisualPreview(null));
   }, [params.id]);
 
   useEffect(() => {
@@ -103,6 +105,7 @@ export default function ProcessingPage() {
           getCaptureSummary(params.id).then(setSummary).catch(() => setSummary(null));
           getFrames(params.id).then(setFrames).catch(() => setFrames([]));
           getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
+          getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => setVisualPreview(null));
         }
       } catch (error) {
         if (!active) return;
@@ -148,9 +151,11 @@ export default function ProcessingPage() {
     : !sparseComplete
       ? "Continue with sparse preview"
       : reconstruction?.denseStatus === "Dense Reconstruction Failed"
-        ? "Use a visual preview pipeline such as Gaussian Splatting"
+        ? "Prepare visual preview inputs for the planned Gaussian Splat integration"
         : "Retry dense reconstruction with better capture";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
+  const visualReadiness = visualPreview?.readiness;
+  const visualManifestReady = visualPreview?.status === "ready" && Boolean(visualPreview.visualPreview);
   const bestAttempt = reconstruction?.bestAttempt;
   const latestAttempt = reconstruction?.latestAttempt;
   const latestWorseThanBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
@@ -229,6 +234,43 @@ export default function ProcessingPage() {
         <p className="mt-2 text-sm leading-6 text-slate-400">
           Structura AI now prepares real capture frames and a reconstruction workspace. COLMAP, OpenMVS, and Blender CLI integration comes next.
         </p>
+
+        <div className="glass-panel mt-8 rounded-lg p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Outputs</h2>
+              <p className="mt-1 text-sm text-slate-400">Structura tracks sparse preview, visual preview, and dense/geometric output separately.</p>
+            </div>
+            <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+              Visual Preview
+            </Link>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Sparse point cloud preview</p>
+              <p className="mt-2 text-xs text-slate-500">Status</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">{reconstruction?.sparseStatus ?? reconstruction?.status ?? "Not Started"}</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">Fast COLMAP point cloud for alignment, coverage, and demo inspection.</p>
+              <p className="mt-2 text-xs text-amber-100/85">Sparse points only; not a dense mesh.</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Visual reconstruction preview</p>
+              <p className="mt-2 text-xs text-slate-500">Status</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">{visualManifestReady ? "Manifest ready" : visualPreview?.status === "failed" ? "Failed" : "Not prepared"}</p>
+              <p className="mt-2 text-xs text-slate-500">Readiness</p>
+              <p className="mt-1 text-xs text-slate-300">{visualReadiness?.label ?? "Not evaluated"}</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">Visual reconstruction preview is intended for a more realistic browser-viewable scene. It is not a measurement-grade mesh.</p>
+              <p className="mt-2 text-xs text-amber-100/85">Gaussian Splat training and rendering are planned next.</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-sm font-semibold text-white">Dense / geometric model</p>
+              <p className="mt-2 text-xs text-slate-500">Status</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">{reconstruction?.denseStatus ?? "Dense Reconstruction Not Started"}</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">Later path for denser geometry and model export.</p>
+              <p className="mt-2 text-xs text-amber-100/85">Current COLMAP build may lack CUDA; mesh/GLB export is not implemented.</p>
+            </div>
+          </div>
+        </div>
 
         <div className="glass-panel mt-8 rounded-lg p-6">
           <div className="flex items-center justify-between gap-4">
