@@ -72,8 +72,20 @@ export type Report = {
   reportCacheStatus?: "hit" | "miss";
   warnings?: string[];
   annotations: Annotation[];
+  modelArtifactSummary?: ModelArtifactSummary;
+  comparisonReadiness?: boolean;
   limitations: string[];
 };
+
+export type ModelArtifact = {
+  artifactId: string; projectId: string; artifactType: "dense_point_cloud" | "textured_mesh" | "mesh" | "gaussian_splat" | "unknown";
+  sourceTool: string; fileName: string; fileSize: number; storagePath: string; relativePath: string; notes: string; role?: "current_state" | "finished_reference" | "baseline" | "comparison_result" | null;
+  stats: { vertexCount?: number; faceCount?: number | null; hasColor?: boolean; gaussianSplatDetected?: boolean; boundingBox?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null; statsPartial?: boolean };
+  importWarning?: string;
+  createdAt: string; updatedAt: string;
+};
+export type ModelArtifactSummary = { artifacts: ModelArtifact[]; latestDensePointCloud: ModelArtifact | null; latestMesh: ModelArtifact | null; latestReferenceModel: ModelArtifact | null; latestCurrentStateModel: ModelArtifact | null; comparisonReady: boolean; message: string };
+export type ArtifactComparison = { comparisonId: string; projectId: string; referenceArtifactId: string; currentArtifactId: string; status: string; notes: string; createdAt: string; updatedAt: string; referenceArtifact: ModelArtifact; currentArtifact: ModelArtifact; comparable: boolean; warning?: string | null; recommendation: string };
 
 export type Diagnostics = {
   product: string;

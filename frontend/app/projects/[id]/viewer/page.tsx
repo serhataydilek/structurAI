@@ -447,9 +447,14 @@ export default function ViewerPage() {
                 <p className="text-sm font-semibold text-white">Outputs</p>
                 <p className="mt-1 text-xs text-slate-400">Sparse, visual, and dense outputs are tracked separately.</p>
               </div>
-              <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
-                Visual Preview page
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
+                  Model Artifacts
+                </Link>
+                <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+                  Visual Preview page
+                </Link>
+              </div>
             </div>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               {([

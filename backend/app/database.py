@@ -176,6 +176,37 @@ def init_db() -> None:
                 summary_json TEXT NOT NULL DEFAULT '{}',
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS model_artifacts (
+                artifact_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                source_tool TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                storage_path TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                role TEXT,
+                stats_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS artifact_comparisons (
+                comparison_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                reference_artifact_id TEXT NOT NULL,
+                current_artifact_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY (reference_artifact_id) REFERENCES model_artifacts(artifact_id),
+                FOREIGN KEY (current_artifact_id) REFERENCES model_artifacts(artifact_id)
+            );
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")

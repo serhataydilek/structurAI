@@ -239,6 +239,10 @@ export default function ReportPage() {
                 </div>
               )}
             </div>
+            <div className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-cyan-50">External model artifacts</p><p className="mt-1 text-sm text-cyan-100/75">{report.modelArtifactSummary?.artifacts.length ?? 0} imported · {report.comparisonReadiness ? "Comparison foundation ready" : "Import a finished reference and current-state model to prepare comparison"}</p></div><Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Manage artifacts</Link></div>
+              <p className="mt-3 text-xs text-cyan-100/70">No progress percentage is shown until aligned external distance analysis is available.</p>
+            </div>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Frame selection</p>

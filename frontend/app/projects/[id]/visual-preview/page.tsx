@@ -125,9 +125,11 @@ export default function VisualPreviewPage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl">
-        <Link href={`/projects/${params.id}/viewer`} className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white">
-          <ArrowLeft size={16} /> Back to viewer
-        </Link>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+          <Link href={`/projects/${params.id}/viewer`} className="inline-flex items-center gap-2 hover:text-white"><ArrowLeft size={16} /> Viewer</Link>
+          <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-1.5 font-medium text-brand hover:bg-brand/10">Model Artifacts</Link>
+          <Link href={`/projects/${params.id}/report`} className="hover:text-white">Report</Link>
+        </div>
 
         <div className="glass-panel mt-5 rounded-lg p-8">
           <p className="text-sm text-brand">Visual Preview Foundation</p>

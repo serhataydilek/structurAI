@@ -5,7 +5,7 @@ from typing import Any
 
 from app.repositories import annotation_repository, capture_repository, media_repository, project_repository, reconstruction_repository
 from app.database import get_connection
-from app.services import reconstruction_service, visual_preview_service
+from app.services import model_artifact_service, reconstruction_service, visual_preview_service
 from app.services.processing_service import readiness_label
 
 
@@ -266,6 +266,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
     visual_preview = visual_preview_service.visual_preview_summary(project_id)
+    model_artifacts = model_artifact_service.summary(project_id)
     cache_key = _cache_key(project, capture, annotations, reconstruction_summary, visual_preview, len(media))
     cached = _get_cached_report(project_id, cache_key)
     if cached:
@@ -368,10 +369,13 @@ def build_report(project_id: str) -> dict[str, Any] | None:
             "nextStep": "Dense reconstruction / point cloud visualization",
         },
         "annotations": annotations,
+        "modelArtifactSummary": model_artifacts,
+        "comparisonReadiness": model_artifacts["comparisonReady"],
         "limitations": [
             *_limitations(reconstruction_summary, preview_mode),
             "Full Gaussian Splat rendering is not implemented in this version.",
             "Visual preview is optimized for viewing, not measurement-grade geometry.",
+            "Progress percentages and geometry distances are not generated until aligned external analysis is available.",
         ],
     }
     _store_cached_report(project_id, cache_key, report)

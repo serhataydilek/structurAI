@@ -1,4 +1,4 @@
-import type { Annotation, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, PointCloudResponse, PreviewMode, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ModelArtifact, ModelArtifactSummary, PointCloudResponse, PreviewMode, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -192,6 +192,36 @@ export function addAnnotation(projectId: string, text: string) {
 
 export function getReport(projectId: string) {
   return request<Report>(`/projects/${projectId}/report`);
+}
+
+export function listModelArtifacts(projectId: string) {
+  return request<ModelArtifactSummary>(`/projects/${projectId}/model-artifacts`);
+}
+
+export function importModelArtifact(projectId: string, file: File, payload: { artifactType: string; sourceTool: string; notes?: string; role?: string }) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("artifactType", payload.artifactType);
+  form.append("sourceTool", payload.sourceTool);
+  form.append("notes", payload.notes ?? "");
+  if (payload.role) form.append("role", payload.role);
+  return request<ModelArtifact>(`/projects/${projectId}/model-artifacts/import`, { method: "POST", body: form });
+}
+
+export function modelArtifactDownloadUrl(projectId: string, artifactId: string) {
+  return `${API_BASE}/projects/${projectId}/model-artifacts/${artifactId}/download`;
+}
+
+export function setModelArtifactRole(projectId: string, artifactId: string, role: string) {
+  return request<ModelArtifact>(`/projects/${projectId}/model-artifacts/${artifactId}/role`, { method: "POST", body: JSON.stringify({ role }) });
+}
+
+export function listComparisons(projectId: string) {
+  return request<ArtifactComparison[]>(`/projects/${projectId}/comparisons`);
+}
+
+export function createComparison(projectId: string, referenceArtifactId: string, currentArtifactId: string, notes = "") {
+  return request<ArtifactComparison>(`/projects/${projectId}/comparisons`, { method: "POST", body: JSON.stringify({ referenceArtifactId, currentArtifactId, notes }) });
 }
 
 export function saveAttemptViewerTransform(projectId: string, attemptId: string, transform: ViewerTransform, previewMode: PreviewMode) {

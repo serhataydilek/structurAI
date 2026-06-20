@@ -1,5 +1,16 @@
 # Structura AI
 
+## v0.4: Two-pipeline model workflow
+
+Structura separates visual preview from measurement/progress work:
+
+- **Visual Preview:** COLMAP + Nerfstudio Splatfacto / Gaussian Splat. Useful for visual inspection only; it is not measurement-grade geometry.
+- **Measurement / Progress:** import dense point clouds (`.ply`) or meshes (`.ply`, `.obj`) created in RealityCapture, Metashape, Pix4D, CloudCompare, or a comparable tool. Structura stores artifact metadata, provides safe downloads, and records reference-vs-current comparisons without inventing a progress percentage.
+
+Recommended immediate workflow: capture photos; validate capture in Structura; create a high-quality model in RealityCapture/Metashape/Pix4D; import it; mark the finished reference and current state; create a comparison record; then generate the report. Alignment and point-cloud distance analysis remain external (for example CloudCompare) until the internal comparison engine is implemented.
+
+v0.4 supports importing artifacts and creating comparison records. Real progress measurement requires externally generated dense point clouds or meshes; Gaussian Splat exports remain preview-only.
+
 Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos or video, prepare frames, run COLMAP sparse reconstruction, track attempts, choose the best result, view a sparse building point cloud, and generate a cached scan report. The current demo proves a practical sparse reconstruction workflow without claiming a finished dense mesh or production inspection model.
 
 ## Demo Result

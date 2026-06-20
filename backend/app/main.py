@@ -3,15 +3,15 @@ import os
 import shutil
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, media_repository, project_repository
-from app.services import processing_service, reconstruction_service, report_service, visual_preview_service
+from app.repositories import annotation_repository, media_repository, model_artifact_repository, project_repository
+from app.services import model_artifact_service, processing_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -78,6 +78,17 @@ class VisualPreviewTrainPayload(BaseModel):
 
 class VisualPreviewExportPayload(BaseModel):
     visualPreviewId: str | None = None
+
+
+class ComparisonCreate(BaseModel):
+    referenceArtifactId: str
+    currentArtifactId: str
+    notes: str = ""
+    status: str = "requires_external_analysis"
+
+
+class ArtifactRoleUpdate(BaseModel):
+    role: str | None = None
 
 
 def _is_dev_mode() -> bool:
@@ -303,6 +314,90 @@ def get_visual_preview_summary(project_id: str) -> dict:
     if not summary:
         raise HTTPException(status_code=404, detail="Project not found")
     return summary
+
+
+@app.post("/projects/{project_id}/model-artifacts/import")
+async def import_model_artifact(project_id: str, file: UploadFile | None = File(default=None), artifactType: str = Form("unknown"),
+                                sourceTool: str = Form("manual"), notes: str = Form(""), role: str | None = Form(default=None),
+                                filePath: str | None = Form(default=None)) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not file and not filePath:
+        raise HTTPException(status_code=400, detail="Provide a model artifact file or filePath")
+    try:
+        if file:
+            staging = PROCESSED_DIR / project_id / ".artifact_uploads"
+            staging.mkdir(parents=True, exist_ok=True)
+            source = staging / f"{uuid4()}_{Path(file.filename or 'artifact').name}"
+            source.write_bytes(await file.read())
+            result = model_artifact_service.import_artifact(project_id, source, file.filename or source.name, artifactType, sourceTool, notes, role)
+            source.unlink(missing_ok=True)
+        else:
+            source = Path(filePath or "").expanduser().resolve()
+            result = model_artifact_service.import_artifact(project_id, source, source.name, artifactType, sourceTool, notes, role)
+        return result
+    except model_artifact_service.ModelArtifactError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/model-artifacts")
+def list_model_artifacts(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return model_artifact_service.summary(project_id)
+
+
+@app.get("/projects/{project_id}/model-artifacts/{artifact_id}")
+def get_model_artifact(project_id: str, artifact_id: str) -> dict:
+    artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model artifact not found")
+    return artifact
+
+
+@app.post("/projects/{project_id}/model-artifacts/{artifact_id}/role")
+def update_model_artifact_role(project_id: str, artifact_id: str, payload: ArtifactRoleUpdate) -> dict:
+    if payload.role and payload.role not in model_artifact_service.ROLES:
+        raise HTTPException(status_code=400, detail="Unsupported artifact role")
+    artifact = model_artifact_repository.set_role(project_id, artifact_id, payload.role)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model artifact not found")
+    return artifact
+
+
+@app.get("/projects/{project_id}/model-artifacts/{artifact_id}/download")
+def download_model_artifact(project_id: str, artifact_id: str) -> FileResponse:
+    artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
+    path = Path(artifact["storagePath"]) if artifact else None
+    if not artifact or not path or not path.is_file() or PROCESSED_DIR.resolve() not in path.resolve().parents:
+        raise HTTPException(status_code=404, detail="Model artifact not found")
+    return FileResponse(path, media_type="application/octet-stream", filename=artifact["fileName"])
+
+
+@app.post("/projects/{project_id}/comparisons")
+def create_comparison(project_id: str, payload: ComparisonCreate) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    if payload.status not in {"pending", "ready", "requires_external_analysis", "completed", "failed"}:
+        raise HTTPException(status_code=400, detail="Unsupported comparison status")
+    if not model_artifact_repository.get_artifact(project_id, payload.referenceArtifactId) or not model_artifact_repository.get_artifact(project_id, payload.currentArtifactId):
+        raise HTTPException(status_code=404, detail="Comparison artifact not found")
+    return model_artifact_service.comparison_detail(project_id, model_artifact_repository.add_comparison(project_id, payload.referenceArtifactId, payload.currentArtifactId, payload.status, payload.notes))
+
+
+@app.get("/projects/{project_id}/comparisons")
+def list_comparisons(project_id: str) -> list[dict]:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return [model_artifact_service.comparison_detail(project_id, item) for item in model_artifact_repository.list_comparisons(project_id)]
+
+
+@app.get("/projects/{project_id}/comparisons/{comparison_id}")
+def get_comparison(project_id: str, comparison_id: str) -> dict:
+    comparison = model_artifact_repository.get_comparison(project_id, comparison_id)
+    if not comparison:
+        raise HTTPException(status_code=404, detail="Comparison not found")
+    return model_artifact_service.comparison_detail(project_id, comparison)
 
 
 @app.post("/projects/{project_id}/visual-preview/prepare")

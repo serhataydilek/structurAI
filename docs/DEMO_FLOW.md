@@ -1,6 +1,18 @@
 # Demo Flow
 
-Use this flow for a portfolio or GitHub demo of Structura AI v0.1.
+Use this flow for a portfolio or GitHub demo of Structura AI v0.4.
+
+## Client-quality model and progress flow
+
+1. Capture building photos.
+2. Validate capture in Structura.
+3. Process the high-quality dense point cloud or mesh in RealityCapture, Metashape, Pix4D, or a similar photogrammetry tool.
+4. Open **External Model Artifacts** in Structura and import the `.ply` or `.obj` output.
+5. Mark one artifact as `finished_reference` and another as `current_state`.
+6. Create the comparison record.
+7. Generate the report.
+
+The comparison record is intentionally a foundation only: no automatic progress percentage or geometry distance is claimed. Align and analyze the models in CloudCompare (or a future internal Open3D-style distance engine). Gaussian Splat remains an optional visual preview, not a measurement source.
 
 ## Start Local Services
 
