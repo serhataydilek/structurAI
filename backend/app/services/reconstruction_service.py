@@ -9,9 +9,9 @@ from uuid import uuid4
 
 from app.database import PROCESSED_DIR
 from app.repositories import capture_repository, reconstruction_repository, project_repository
-from app.services import processing_service
+from app.services import job_progress_service, processing_service
 
-SPARSE_NEXT_STEP = "Dense reconstruction / point cloud visualization"
+SPARSE_NEXT_STEP = "Prepare RealityScan job; optional sparse validation is complete"
 POINT_CLOUD_MAX_POINTS = 50000
 DENSE_POINT_CLOUD_MAX_POINTS = 100000
 LIKELY_FAILURE_CAUSES = [
@@ -70,6 +70,9 @@ DEFAULT_FRAME_SELECTION_MODE = "Balanced subset"
 DEFAULT_SELECTED_FRAME_CAP = 120
 MIN_SELECTED_FRAMES = 40
 SPARSE_MODEL_FILES = (("cameras.bin", "images.bin", "points3D.bin"), ("cameras.txt", "images.txt", "points3D.txt"))
+SPARSE_JOB_KEY = "sparse_validation"
+SPARSE_SWEEP_JOB_KEY = "sparse_experiment_sweep"
+DENSE_JOB_KEY = "dense_reconstruction"
 
 
 class ReconstructionError(Exception):
@@ -1019,23 +1022,15 @@ def _capture_fps_metadata(project_id: str) -> tuple[str, int]:
 
 
 def _next_action(sparse_status: str, dense_status: str, dense_support_missing: bool = False, sparse_quality_label: str = "Poor Sparse Reconstruction") -> str:
-    if dense_status == "Dense Reconstruction Complete":
-        return "Review dense point cloud preview"
-    if dense_status == "Dense Reconstruction Failed":
-        if dense_support_missing:
-            return "Continue sparse scene preview or install CUDA-enabled COLMAP"
-        return "Review dense logs and retry dense reconstruction"
     if sparse_status in {"Not Started", "Reconstructing Sparse Model"}:
-        return "Run sparse reconstruction"
+        return "Prepare RealityScan Job; optionally run sparse validation"
     if sparse_status == "Sparse Reconstruction Failed":
-        return "Improve capture quality and rerun sparse reconstruction"
+        return "Prepare RealityScan Job; optionally improve capture and rerun sparse validation"
     if sparse_status == "Sparse Reconstruction Complete" and sparse_quality_label == "Poor Sparse Reconstruction":
-        return "Try a better capture"
-    if sparse_status == "Sparse Reconstruction Complete" and dense_support_missing:
-        return "Continue sparse scene preview or install CUDA-enabled COLMAP"
-    if sparse_status == "Sparse Reconstruction Complete" and dense_status in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
-        return "Run dense reconstruction"
-    return "Run sparse reconstruction"
+        return "Prepare RealityScan Job; sparse validation is weak"
+    if sparse_status == "Sparse Reconstruction Complete":
+        return "Prepare RealityScan Job"
+    return "Prepare RealityScan Job"
 
 
 def _matching_mode_display(metadata: dict[str, Any] | None, sparse_status: str) -> str:
@@ -1219,6 +1214,9 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
                 sparse_quality,
             ),
             "nextStep": SPARSE_NEXT_STEP,
+            "jobProgress": job_progress_service.get(project_id, SPARSE_JOB_KEY),
+            "sweepProgress": job_progress_service.get(project_id, SPARSE_SWEEP_JOB_KEY),
+            "denseProgress": job_progress_service.get(project_id, DENSE_JOB_KEY),
         }
 
     previews = {
@@ -1316,6 +1314,9 @@ def _base_summary(project_id: str) -> dict[str, Any] | None:
         "recommendedFixes": RECOMMENDED_FIXES if sparse_status == "Sparse Reconstruction Failed" else [],
         "recommendedNextAction": _next_action(sparse_status, dense_status, dense_support_missing, sparse_quality),
         "nextStep": SPARSE_NEXT_STEP,
+        "jobProgress": job_progress_service.get(project_id, SPARSE_JOB_KEY),
+        "sweepProgress": job_progress_service.get(project_id, SPARSE_SWEEP_JOB_KEY),
+        "denseProgress": job_progress_service.get(project_id, DENSE_JOB_KEY),
     }
 
 
@@ -1403,8 +1404,28 @@ def run_sparse_reconstruction_sweep(project_id: str) -> dict[str, Any]:
             {"frameSelectionMode": "Sharpest subset", "matchingMode": "Video Sequential"},
             {"frameSelectionMode": "Evenly spaced subset", "matchingMode": "Video Sequential"},
         ]
+    job_progress_service.start(
+        project_id,
+        SPARSE_SWEEP_JOB_KEY,
+        "starting_sweep",
+        f"Starting sparse experiment sweep with {len(configs)} attempts",
+        total_items=len(configs),
+        progress_percent=0,
+    )
     results: list[dict[str, Any]] = []
-    for config in configs:
+    best_so_far = None
+    for index, config in enumerate(configs, start=1):
+        label = f"Attempt {index}/{len(configs)}: {config['matchingMode']} · {config['frameSelectionMode']}"
+        job_progress_service.update(
+            project_id,
+            SPARSE_SWEEP_JOB_KEY,
+            stage="running_attempt",
+            label=label,
+            progress_percent=((index - 1) / max(len(configs), 1)) * 100,
+            processed_items=index - 1,
+            total_items=len(configs),
+            log=f"{label}. Best so far: {best_so_far or 'none yet'}.",
+        )
         before_ids = {attempt["attemptId"] for attempt in reconstruction_repository.list_attempts(project_id)}
         try:
             summary = run_sparse_reconstruction(project_id, config["matchingMode"], config["frameSelectionMode"])
@@ -1414,14 +1435,31 @@ def run_sparse_reconstruction_sweep(project_id: str) -> dict[str, Any]:
             attempt = attempts[0] if attempts else None
             results.append({**_sweep_attempt_result(attempt, str(exc)), **config})
             continue
-        results.append({**_sweep_attempt_result(attempt), **config})
+        result = {**_sweep_attempt_result(attempt), **config}
+        results.append(result)
+        if result.get("sparsePointCount") or result.get("registeredImageCount"):
+            best_so_far = f"{result.get('registeredImageCount', 0)} registered, {result.get('sparsePointCount', 0)} points"
+        job_progress_service.update(
+            project_id,
+            SPARSE_SWEEP_JOB_KEY,
+            label=f"Completed attempt {index}/{len(configs)}",
+            progress_percent=(index / max(len(configs), 1)) * 95,
+            processed_items=index,
+            log=f"Attempt status: {result.get('status')}. Best so far: {best_so_far or 'none yet'}.",
+        )
 
+    job_progress_service.update(project_id, SPARSE_SWEEP_JOB_KEY, stage="selecting_best_attempt", label="Selecting best attempt from sweep", progress_percent=98)
     _update_best_attempt_marker(project_id)
     summary = reconstruction_summary(project_id) or {}
     best_attempt = summary.get("bestAttempt")
     best_id = best_attempt.get("attemptId") if best_attempt else None
     for result in results:
         result["isBestAttempt"] = bool(result.get("attemptId") and result["attemptId"] == best_id)
+    job_progress_service.complete(
+        project_id,
+        SPARSE_SWEEP_JOB_KEY,
+        f"Sparse experiment sweep complete. Best attempt: {best_attempt.get('registeredImageCount', 0) if best_attempt else 0} registered, {best_attempt.get('sparsePointCount', 0) if best_attempt else 0} points",
+    )
     return {
         "projectId": project_id,
         "status": "Sweep Complete",
@@ -1440,6 +1478,13 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
     if not frames:
         raise ReconstructionError("No extracted frames found. Process the capture before running sparse reconstruction.")
 
+    job_progress_service.start(
+        project_id,
+        SPARSE_JOB_KEY,
+        "preparing_workspace",
+        "Preparing selected frames for optional sparse validation",
+        progress_percent=5,
+    )
     requested_matching_mode = normalize_matching_mode(matching_mode)
     matching_mode_used = _matching_mode_to_use(requested_matching_mode, project_id)
     selection = _create_frame_selection(project_id, frame_selection_mode or _default_frame_selection_mode(project_id))
@@ -1450,6 +1495,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
     diag = diagnostics()
     if not diag["colmapAvailable"] or not diag["colmapPath"]:
         warnings = ["COLMAP is not available on PATH. Install COLMAP and verify with colmap -h or COLMAP.bat -h."]
+        job_progress_service.fail(project_id, SPARSE_JOB_KEY, "COLMAP is required for sparse validation but was not detected on PATH.", warnings=warnings)
         reconstruction_repository.upsert_reconstruction_metadata(
             project_id=project_id,
             status="Sparse Reconstruction Failed",
@@ -1515,6 +1561,14 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
 
     colmap = diag["colmapPath"]
     try:
+        job_progress_service.update(
+            project_id,
+            SPARSE_JOB_KEY,
+            stage="feature_extraction",
+            label="COLMAP feature extraction running",
+            progress_percent=10,
+            log="Feature extraction can take longer on large or blurry photo sets.",
+        )
         _run_colmap_step(
             "feature_extractor",
             [
@@ -1529,18 +1583,23 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
             ],
             paths["logs"] / "feature_extractor.log",
         )
+        job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="feature_extraction", label="Feature extraction complete", progress_percent=35)
         if matching_mode_used == "Video Sequential":
+            job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="matching", label="COLMAP sequential matching running", progress_percent=35)
             _run_colmap_step(
                 "sequential_matcher",
                 [colmap, "sequential_matcher", "--database_path", str(paths["database"])],
                 paths["logs"] / "sequential_matcher.log",
             )
         else:
+            job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="matching", label="COLMAP exhaustive matching running", progress_percent=35)
             _run_colmap_step(
                 "exhaustive_matcher",
                 [colmap, "exhaustive_matcher", "--database_path", str(paths["database"])],
                 paths["logs"] / "exhaustive_matcher.log",
             )
+        job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="matching", label="Image matching complete", progress_percent=65)
+        job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="mapping", label="COLMAP mapper running", progress_percent=65, log="ETA unknown while COLMAP is mapping images.")
         _run_colmap_step(
             "mapper",
             [
@@ -1555,8 +1614,10 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
             ],
             paths["logs"] / "mapper.log",
         )
+        job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="mapping", label="Mapper complete", progress_percent=90)
     except (ReconstructionError, subprocess.TimeoutExpired, OSError) as exc:
         message = str(exc)
+        job_progress_service.fail(project_id, SPARSE_JOB_KEY, message, warnings=["Optional sparse validation failed. Check capture quality and COLMAP logs."])
         reconstruction_repository.upsert_attempt(
             attempt_id=attempt_id,
             project_id=project_id,
@@ -1600,6 +1661,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
         raise ReconstructionError(message) from exc
 
     sparse_exists = _sparse_output_exists(paths)
+    job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="parsing_output", label="Parsing sparse validation output", progress_percent=92)
     conversion_ok = False
     conversion_warning = None
     if sparse_exists:
@@ -1634,6 +1696,7 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
         scene_analysis_summary={},
         failure_reason=None if sparse_exists else "No sparse model files were generated.",
     )
+    job_progress_service.update(project_id, SPARSE_JOB_KEY, stage="selecting_best_attempt", label="Selecting best sparse validation attempt", progress_percent=98)
     _update_best_attempt_marker(project_id)
     analysis = scene_analysis(project_id, attempt_id)
     reconstruction_repository.upsert_attempt(
@@ -1676,6 +1739,10 @@ def run_sparse_reconstruction(project_id: str, matching_mode: str | None = None,
         completed_at=datetime.now(timezone.utc).isoformat(),
     )
     project_repository.set_status(project_id, status)
+    if sparse_exists:
+        job_progress_service.complete(project_id, SPARSE_JOB_KEY, f"Sparse validation complete: {registered_image_count}/{selection['selectedFrameCount']} registered, {sparse_point_count:,} points", warnings=warnings)
+    else:
+        job_progress_service.fail(project_id, SPARSE_JOB_KEY, "No sparse model files were generated.", warnings=warnings)
     return reconstruction_summary(project_id) or {}
 
 
@@ -1684,8 +1751,10 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     if not project:
         raise ReconstructionError("Project not found")
 
+    job_progress_service.start(project_id, DENSE_JOB_KEY, "preflight", "Checking advanced dense reconstruction prerequisites", progress_percent=5)
     metadata = reconstruction_repository.get_reconstruction_metadata(project_id)
     if not metadata or metadata["status"] != "Sparse Reconstruction Complete":
+        job_progress_service.fail(project_id, DENSE_JOB_KEY, "Run sparse validation successfully before dense reconstruction.")
         raise ReconstructionError("Run sparse reconstruction successfully before dense reconstruction.")
 
     legacy_paths = _workspace(project_id)
@@ -1696,6 +1765,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     sparse_model_path = _detected_sparse_model_path(paths)
     if not sparse_model_path:
         message = _sparse_model_missing_message(paths)
+        job_progress_service.fail(project_id, DENSE_JOB_KEY, message)
         reconstruction_repository.update_dense_metadata(
             project_id=project_id,
             dense_status="Dense Reconstruction Failed",
@@ -1710,6 +1780,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
 
     diag = diagnostics()
     if not diag["colmapAvailable"] or not diag["colmapPath"]:
+        job_progress_service.fail(project_id, DENSE_JOB_KEY, "COLMAP is required for dense reconstruction but was not detected on PATH.")
         reconstruction_repository.update_dense_metadata(
             project_id=project_id,
             dense_status="Dense Reconstruction Failed",
@@ -1742,6 +1813,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
     colmap = diag["colmapPath"]
     dense_output = _dense_point_file(paths)
     try:
+        job_progress_service.update(project_id, DENSE_JOB_KEY, stage="image_undistortion", label="COLMAP image undistortion running", progress_percent=15)
         _run_colmap_step(
             "image_undistorter",
             [
@@ -1759,6 +1831,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
             paths["dense_logs"] / "image_undistorter.log",
             timeout_seconds=1800,
         )
+        job_progress_service.update(project_id, DENSE_JOB_KEY, stage="patch_match_stereo", label="COLMAP patch-match stereo running", progress_percent=40, log="This legacy stage can take longer on large photo sets. ETA unknown.")
         _run_colmap_step(
             "patch_match_stereo",
             [
@@ -1772,6 +1845,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
             paths["dense_logs"] / "patch_match_stereo.log",
             timeout_seconds=7200,
         )
+        job_progress_service.update(project_id, DENSE_JOB_KEY, stage="stereo_fusion", label="COLMAP stereo fusion running", progress_percent=75)
         _run_colmap_step(
             "stereo_fusion",
             [
@@ -1793,6 +1867,7 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
         dense_previews = _dense_log_preview_summary(_dense_log_files(paths))
         message = CUDA_DENSE_FAILURE_MESSAGE if _dense_support_likely_missing(diag, dense_previews) else str(exc)
         warnings = [message] if message == CUDA_DENSE_FAILURE_MESSAGE else ["Dense reconstruction failed. Review dense logs and capture quality."]
+        job_progress_service.fail(project_id, DENSE_JOB_KEY, message, warnings=warnings)
         reconstruction_repository.update_dense_metadata(
             project_id=project_id,
             dense_status="Dense Reconstruction Failed",
@@ -1821,6 +1896,10 @@ def run_dense_reconstruction(project_id: str) -> dict[str, Any]:
         dense_error_message=None if dense_available else "No parseable dense point cloud was generated.",
     )
     project_repository.set_status(project_id, dense_status)
+    if dense_available:
+        job_progress_service.complete(project_id, DENSE_JOB_KEY, f"Dense point cloud complete: {dense_count:,} points", warnings=warnings)
+    else:
+        job_progress_service.fail(project_id, DENSE_JOB_KEY, "No parseable dense point cloud was generated.", warnings=warnings)
     return reconstruction_summary(project_id) or {}
 
 

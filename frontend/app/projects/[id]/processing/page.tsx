@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getProcessingStatus, getProject, getReconstructionSummary, getVisualPreviewSummary, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, startProcessing } from "@/lib/api";
-import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, SparseSweepAttempt, VisualPreviewSummary } from "@/lib/types";
+import { JobProgressCard } from "@/components/JobProgressCard";
+import { API_BASE, getCaptureSummary, getDiagnostics, getFrames, getJobStatus, getProcessingStatus, getProject, getReconstructionSummary, getVisualPreviewSummary, listModelArtifacts, listRealityScanJobs, previewFrameSelection, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, startProcessing } from "@/lib/api";
+import type { CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifactSummary, PhotogrammetryJob, ProcessingStatus, Project, ReconstructionMatchingMode, ReconstructionSummary, SparseSweepAttempt, VisualPreviewSummary } from "@/lib/types";
 import { AlertTriangle, Check, Cpu, ImageIcon, Loader2 } from "lucide-react";
 
 export default function ProcessingPage() {
@@ -18,6 +19,8 @@ export default function ProcessingPage() {
   const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null);
   const [reconstruction, setReconstruction] = useState<ReconstructionSummary | null>(null);
   const [visualPreview, setVisualPreview] = useState<VisualPreviewSummary | null>(null);
+  const [artifactSummary, setArtifactSummary] = useState<ModelArtifactSummary | null>(null);
+  const [realityScanJobs, setRealityScanJobs] = useState<PhotogrammetryJob[]>([]);
   const [reconstructing, setReconstructing] = useState(false);
   const [sweeping, setSweeping] = useState(false);
   const [sweepResults, setSweepResults] = useState<SparseSweepAttempt[]>([]);
@@ -30,12 +33,22 @@ export default function ProcessingPage() {
   const [autoProcessing, setAutoProcessing] = useState(false);
   const [largeFrame, setLargeFrame] = useState<FramePreview | null>(null);
   const [showAllFrames, setShowAllFrames] = useState(false);
+  const [captureProgress, setCaptureProgress] = useState<JobProgress | null>(null);
+  const [sparseProgress, setSparseProgress] = useState<JobProgress | null>(null);
+  const [sweepProgress, setSweepProgress] = useState<JobProgress | null>(null);
+  const [denseProgress, setDenseProgress] = useState<JobProgress | null>(null);
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     getReconstructionSummary(params.id).then(setReconstruction).catch(() => setReconstruction(null));
     getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => setVisualPreview(null));
+    listModelArtifacts(params.id).then(setArtifactSummary).catch(() => setArtifactSummary(null));
+    listRealityScanJobs(params.id).then(setRealityScanJobs).catch(() => setRealityScanJobs([]));
+    getJobStatus(params.id, "capture_processing").then(setCaptureProgress).catch(() => undefined);
+    getJobStatus(params.id, "sparse_validation").then(setSparseProgress).catch(() => undefined);
+    getJobStatus(params.id, "sparse_experiment_sweep").then(setSweepProgress).catch(() => undefined);
+    getJobStatus(params.id, "dense_reconstruction").then(setDenseProgress).catch(() => undefined);
   }, [params.id]);
 
   useEffect(() => {
@@ -132,6 +145,31 @@ export default function ProcessingPage() {
     };
   }, [params.id]);
 
+  useEffect(() => {
+    if (!autoProcessing && !reconstructing && !sweeping && !denseReconstructing) return;
+    let active = true;
+    const poll = async () => {
+      const [capture, sparse, sweep, dense] = await Promise.all([
+        getJobStatus(params.id, "capture_processing").catch(() => null),
+        getJobStatus(params.id, "sparse_validation").catch(() => null),
+        getJobStatus(params.id, "sparse_experiment_sweep").catch(() => null),
+        getJobStatus(params.id, "dense_reconstruction").catch(() => null)
+      ]);
+      if (!active) return;
+      if (capture) setCaptureProgress(capture);
+      if (sparse) setSparseProgress(sparse);
+      if (sweep) setSweepProgress(sweep);
+      if (dense) setDenseProgress(dense);
+      window.setTimeout(() => {
+        if (active) poll().catch(() => undefined);
+      }, 1500);
+    };
+    poll().catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [params.id, autoProcessing, reconstructing, sweeping, denseReconstructing]);
+
   const progress = status?.progress ?? 0;
   const hasFrames = (summary?.extractedFrameCount ?? status?.extractedFrameCount ?? 0) > 0;
   const colmapAvailable = diagnostics?.colmap.colmapAvailable ?? false;
@@ -140,22 +178,24 @@ export default function ProcessingPage() {
   const denseLikelyUnavailable = denseLikelyAvailable === false;
   const sparseComplete = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Complete";
   const denseComplete = reconstruction?.denseStatus === "Dense Reconstruction Complete";
+  const realityScanJobExists = realityScanJobs.length > 0;
+  const currentModel = artifactSummary?.latestCurrentStateModel;
+  const referenceModel = artifactSummary?.latestReferenceModel;
+  const topPrimaryAction = !realityScanJobExists
+    ? { href: `/projects/${params.id}/photogrammetry`, label: "Prepare RealityScan Job" }
+    : !currentModel
+      ? { href: `/projects/${params.id}/model-artifacts`, label: "Import RealityScan ZIP" }
+      : !referenceModel
+        ? { href: `/projects/${params.id}/model-artifacts`, label: "Import Finished Reference Model" }
+        : { href: `/projects/${params.id}/model-artifacts`, label: "Create Comparison Record" };
   const denseReadiness = reconstruction?.denseReadiness;
   const attempts = reconstruction?.reconstructionAttempts ?? [];
   const hasSparseAttempt = attempts.length > 0;
   const sparseFinished = reconstruction?.sparseStatus === "Sparse Reconstruction Complete" || reconstruction?.sparseStatus === "Sparse Reconstruction Failed" || reconstruction?.status === "Sparse Reconstruction Complete" || reconstruction?.status === "Sparse Reconstruction Failed";
   const sparseQualityPoor = Boolean(hasSparseAttempt && sparseFinished && reconstruction?.sparseQualityLabel === "Poor Sparse Reconstruction" && ((reconstruction?.registeredImageCount ?? 0) < 15 || (reconstruction?.sparsePointCount ?? 0) < 1500));
   const canRunDense = sparseComplete && !denseComplete && colmapAvailable && !denseLikelyUnavailable && (denseReadiness?.ready ?? true);
-  const denseRecommendedPath = denseLikelyUnavailable
-    ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
-    : !sparseComplete
-      ? "Continue with sparse preview"
-      : reconstruction?.denseStatus === "Dense Reconstruction Failed"
-        ? "Prepare visual preview inputs for the planned Gaussian Splat integration"
-        : "Retry dense reconstruction with better capture";
+  const denseRecommendedPath = "Advanced / legacy diagnostics only. Use RealityScan for client-quality geometry.";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
-  const visualReadiness = visualPreview?.readiness;
-  const visualManifestReady = visualPreview?.status === "ready" && Boolean(visualPreview.visualPreview);
   const bestAttempt = reconstruction?.bestAttempt;
   const latestAttempt = reconstruction?.latestAttempt;
   const latestWorseThanBest = Boolean(bestAttempt && latestAttempt && bestAttempt.attemptId !== latestAttempt.attemptId);
@@ -232,44 +272,63 @@ export default function ProcessingPage() {
         <p className="text-sm text-brand">Capture Processing</p>
         <h1 className="mt-2 text-3xl font-semibold text-white">{project?.name ?? "Scan project"}</h1>
         <p className="mt-2 text-sm leading-6 text-slate-400">
-          Structura AI now prepares real capture frames and a reconstruction workspace. COLMAP, OpenMVS, and Blender CLI integration comes next.
+          Structura prepares capture frames, validates coverage, prepares RealityScan-ready image sets, and imports external model artifacts for progress readiness.
         </p>
 
         <div className="glass-panel mt-8 rounded-lg p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-white">Outputs</h2>
-              <p className="mt-1 text-sm text-slate-400">Use sparse reconstruction for capture validation, then import client-quality external geometry in Model Artifacts.</p>
+              <h2 className="text-lg font-semibold text-white">Recommended workflow</h2>
+              <p className="mt-1 text-sm text-slate-400">RealityScan or another external photogrammetry tool is the primary geometry path. Sparse validation is optional.</p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <Link href={topPrimaryAction.href} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">
+                {topPrimaryAction.label}
+              </Link>
               <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
                 Model Artifacts
               </Link>
             </div>
           </div>
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs text-slate-500">Capture</p>
+              <p className="mt-1 text-sm font-semibold text-white">{hasFrames || status?.workspacePrepared ? "Ready" : "Not run yet."}</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs text-slate-500">Sparse validation</p>
+              <p className="mt-1 text-sm font-semibold text-white">
+                {sparseComplete ? `${(reconstruction?.sparseQualityLabel ?? "Complete").replace(" Sparse Reconstruction", "")}, ${reconstruction?.registeredImageCount ?? 0}/${reconstruction?.selectedFrameCount ?? reconstruction?.inputFrameCount ?? 0}, ${(reconstruction?.sparsePointCount ?? 0).toLocaleString()} points` : "Not run yet."}
+              </p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs text-slate-500">RealityScan model</p>
+              <p className="mt-1 text-sm font-semibold text-white">{currentModel ? "Current model imported" : "Not imported yet"}</p>
+            </div>
+            <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-xs text-slate-500">Progress readiness</p>
+              <p className="mt-1 text-sm font-semibold text-white">{currentModel && referenceModel ? "Current/reference pair ready" : "Current/reference pair missing"}</p>
+            </div>
+          </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">Sparse point cloud preview</p>
+              <p className="text-sm font-semibold text-white">Optional Sparse Validation</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
               <p className="mt-1 text-sm font-semibold text-slate-100">{reconstruction?.sparseStatus ?? reconstruction?.status ?? "Not Started"}</p>
-              <p className="mt-3 text-xs leading-5 text-slate-400">Fast COLMAP point cloud for alignment, coverage, and demo inspection.</p>
-              <p className="mt-2 text-xs text-amber-100/85">Sparse points only; not a dense mesh.</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">COLMAP sparse points for capture coverage and registration checks only.</p>
+              <p className="mt-2 text-xs text-amber-100/85">Validation output, not the final model.</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">Visual reconstruction preview</p>
+              <p className="text-sm font-semibold text-white">RealityScan model artifact</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
-              <p className="mt-1 text-sm font-semibold text-slate-100">{visualManifestReady ? "Manifest ready" : visualPreview?.status === "failed" ? "Failed" : "Not prepared"}</p>
-              <p className="mt-2 text-xs text-slate-500">Readiness</p>
-              <p className="mt-1 text-xs text-slate-300">{visualReadiness?.label ?? "Not evaluated"}</p>
-              <p className="mt-3 text-xs leading-5 text-slate-400">Visual reconstruction preview is intended for a more realistic browser-viewable scene. It is not a measurement-grade mesh.</p>
-              <p className="mt-2 text-xs text-amber-100/85">Gaussian Splat training and rendering are planned next.</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">Import through Model Artifacts</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">Prepare a RealityScan job, export OBJ + MTL + textures as ZIP, then import it as the current-state model.</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">Dense / geometric model</p>
+              <p className="text-sm font-semibold text-white">Progress readiness</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
-              <p className="mt-1 text-sm font-semibold text-slate-100">{reconstruction?.denseStatus ?? "Dense Reconstruction Not Started"}</p>
-              <p className="mt-3 text-xs leading-5 text-slate-400">Later path for denser geometry and model export.</p>
-              <p className="mt-2 text-xs text-amber-100/85">Current COLMAP build may lack CUDA; mesh/GLB export is not implemented.</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">Current/reference pair missing</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">Construction progress percentages require a current model, finished reference, alignment, and comparison analysis.</p>
             </div>
           </div>
         </div>
@@ -315,7 +374,7 @@ export default function ProcessingPage() {
           {status?.workspacePrepared && (
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href={`/projects/${params.id}/viewer`} className="inline-flex rounded-md bg-brand px-5 py-3 font-semibold text-ink hover:bg-cyan-200">
-                Open Future Viewer Preview
+                Open Capture Validation Viewer
               </Link>
               <Link href={`/projects/${params.id}/report`} className="inline-flex rounded-md border border-white/10 px-5 py-3 font-semibold text-slate-100 hover:bg-white/10">
                 View Capture Report
@@ -327,6 +386,9 @@ export default function ProcessingPage() {
               Upload complete. Extracting full reconstruction frames and generating preview thumbnails...
             </div>
           )}
+          <div className="mt-5">
+            <JobProgressCard progress={captureProgress ?? status?.jobProgress} title="Capture processing progress" />
+          </div>
         </div>
 
         <section className="glass-panel mt-6 rounded-lg p-6">
@@ -374,7 +436,7 @@ export default function ProcessingPage() {
           </div>
           <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
             <p className="text-xs text-slate-500">Next technical step</p>
-            <p className="mt-2 text-sm font-semibold text-white">Run reconstruction pipeline using COLMAP/OpenMVS</p>
+            <p className="mt-2 text-sm font-semibold text-white">{summary?.workspacePrepared || status?.workspacePrepared ? "Prepare RealityScan Job" : "Not run yet."}</p>
             <p className="mt-2 text-xs text-slate-500">Workspace: {summary?.workspacePrepared || status?.workspacePrepared ? "Prepared" : "Pending"}</p>
           </div>
 
@@ -417,10 +479,10 @@ export default function ProcessingPage() {
             <div>
               <div className="flex items-center gap-2">
                 <Cpu size={18} className="text-brand" />
-                <h2 className="text-lg font-semibold text-white">Sparse Reconstruction</h2>
+                <h2 className="text-lg font-semibold text-white">Optional Sparse Validation</h2>
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Sparse reconstruction runs COLMAP feature extraction, matching, and mapper. Dense reconstruction can create a denser point cloud, but it is still not a mesh or finished production model.
+                Optional sparse validation runs COLMAP feature extraction, matching, and mapper to check capture overlap and registration. RealityScan remains the primary model workflow.
               </p>
             </div>
             <button
@@ -428,23 +490,27 @@ export default function ProcessingPage() {
               onClick={onRunSparseReconstruction}
               className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {reconstructing ? "Running COLMAP..." : "Run Sparse Reconstruction"}
+              {reconstructing ? "Running..." : "Run Optional Sparse Validation"}
             </button>
           </div>
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-            This will run multiple COLMAP sparse attempts with different frame selection strategies. It may take several minutes but can improve reconstruction quality.
+            Sparse validation is optional. A sweep runs multiple COLMAP attempts with different frame selection strategies to find the strongest validation result.
             <button
               type="button"
               disabled={!hasFrames || !colmapAvailable || reconstructing || sweeping}
               onClick={onRunSparseSweep}
               className="mt-3 block rounded-md border border-amber-300/30 px-3 py-2 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {sweeping ? "Running Sparse Experiment Sweep..." : "Run Sparse Experiment Sweep"}
+              {sweeping ? "Running..." : "Run Sparse Experiment Sweep"}
             </button>
+          </div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <JobProgressCard progress={sparseProgress ?? reconstruction?.jobProgress} title="Sparse validation progress" unknownEtaMessage="ETA unknown while COLMAP is matching or mapping images." />
+            <JobProgressCard progress={sweepProgress ?? reconstruction?.sweepProgress} title="Sparse experiment sweep progress" unknownEtaMessage="ETA unknown until each COLMAP attempt completes." />
           </div>
 
           <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <p className="text-xs text-slate-500">Reconstruction matching mode</p>
+              <p className="text-xs text-slate-500">Sparse validation matching mode</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {(["Auto", "Video Sequential", "Photo Exhaustive"] as ReconstructionMatchingMode[]).map((mode) => (
                 <button
@@ -517,7 +583,7 @@ export default function ProcessingPage() {
               <p className="mt-2 text-2xl font-semibold text-white">{reconstruction?.inputFrameCount ?? summary?.extractedFrameCount ?? 0}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-xs text-slate-500">Sparse output</p>
+              <p className="text-xs text-slate-500">Validation output</p>
               <p className="mt-2 text-sm font-semibold text-white">{reconstruction?.sparseOutputExists ? "Found" : "Not generated"}</p>
             </div>
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -614,7 +680,7 @@ export default function ProcessingPage() {
           )}
           {reconstruction?.status === "Sparse Reconstruction Complete" && (
             <div className="mt-4 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-3 text-sm text-emerald-100">
-              Sparse reconstruction complete. Camera poses and sparse structure were generated. Dense reconstruction is the next milestone.
+              Sparse validation complete. Camera poses and sparse structure were generated for capture validation. Prepare a RealityScan job for the client-quality model.
             </div>
           )}
           {(reconstructionError || reconstruction?.status === "Sparse Reconstruction Failed") && (
@@ -638,11 +704,11 @@ export default function ProcessingPage() {
             <div className="mt-5 rounded-md border border-white/10 bg-slate-950/60 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-white">Reconstruction Attempts</p>
-                  <p className="mt-1 text-xs text-slate-400">The viewer uses the best sparse attempt by default, not necessarily the latest run.</p>
+                  <p className="text-sm font-semibold text-white">Sparse validation attempts</p>
+                  <p className="mt-1 text-xs text-slate-400">Failed or empty attempts are kept for diagnostics; the viewer uses the best successful validation attempt by default.</p>
                 </div>
                 <Link href={`/projects/${params.id}/viewer`} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">
-                  View Best Attempt
+                  Open Capture Validation Viewer
                 </Link>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -660,6 +726,10 @@ export default function ProcessingPage() {
                   Latest attempt is worse than the best saved attempt. Viewer is showing the best attempt by default.
                 </div>
               )}
+              <details className="mt-3">
+                <summary className="cursor-pointer rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-semibold text-slate-200">
+                  Show validation attempt diagnostics
+                </summary>
               <div className="mt-3 space-y-2">
                 {attempts.map((attempt) => (
                   <div key={attempt.attemptId} className={`rounded-md border p-3 text-sm ${attempt.isBestAttempt ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-white/10 bg-white/[0.03] text-slate-300"}`}>
@@ -678,6 +748,7 @@ export default function ProcessingPage() {
                   </div>
                 ))}
               </div>
+              </details>
             </div>
           )}
           {sweepResults.length > 0 && (
@@ -733,10 +804,10 @@ export default function ProcessingPage() {
             <div>
               <div className="flex items-center gap-2">
                 <Cpu size={18} className="text-brand" />
-                <h2 className="text-lg font-semibold text-white">Dense Reconstruction</h2>
+                <h2 className="text-lg font-semibold text-white">Advanced / Legacy Reconstruction Diagnostics</h2>
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Phase 3A runs COLMAP image undistortion, patch match stereo, and stereo fusion to produce a dense point cloud. It does not generate a mesh or GLB.
+                Dense COLMAP is retained as an advanced diagnostic path. It is not the primary Structura workflow; use RealityScan artifacts for client-quality geometry.
               </p>
             </div>
             {!denseLikelyUnavailable && !sparseQualityPoor && (
@@ -745,19 +816,22 @@ export default function ProcessingPage() {
                 onClick={onRunDenseReconstruction}
                 className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+                {denseReconstructing ? "Running..." : "Run Dense Reconstruction"}
               </button>
             )}
           </div>
+          <div className="mt-5">
+            <JobProgressCard progress={denseProgress ?? reconstruction?.denseProgress} title="Legacy dense reconstruction progress" unknownEtaMessage="ETA unknown while COLMAP dense stereo is running." />
+          </div>
 
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
-            {denseLikelyUnavailable ? "Dense reconstruction is unavailable with the current COLMAP build. Sparse reconstruction works, but dense stereo requires a CUDA-enabled COLMAP build." : "Dense reconstruction can take much longer than sparse reconstruction, especially without CUDA."}
+            {denseLikelyUnavailable ? "Dense COLMAP is unavailable with the current build. RealityScan remains the recommended geometry path." : "Dense COLMAP can take much longer than sparse validation and remains an advanced diagnostic path."}
           </div>
 
           <div className="mt-5 rounded-md border border-white/10 bg-slate-950/60 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-white">Dense Readiness</p>
+                <p className="text-sm font-semibold text-white">Legacy dense readiness</p>
                 <p className="mt-1 text-xs text-slate-400">{colmapCudaHint}</p>
               </div>
               <span className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${denseLikelyUnavailable ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"}`}>

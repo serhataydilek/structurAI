@@ -4,11 +4,7 @@ from uuid import uuid4
 
 from app.database import get_connection
 
-DEFAULT_ANNOTATIONS = [
-    "Window wall",
-    "Scan coverage needs improvement near corner",
-    "Potential renovation area",
-]
+DEFAULT_ANNOTATIONS: list[str] = []
 
 
 def list_annotations(project_id: str) -> list[dict[str, Any]]:

@@ -254,15 +254,7 @@ export default function ViewerPage() {
   const denseReadiness = reconstruction?.denseReadiness;
   const denseReady = denseReadiness?.ready ?? true;
   const canRunDense = sparseStatus === "Sparse Reconstruction Complete" && denseStatus !== "Dense Reconstruction Complete" && colmapAvailable && !denseLikelyUnavailable && denseReady && !sparseQualityPoor;
-  const denseRecommendedPath = denseLikelyUnavailable
-    ? "Continue with sparse scene preview or install a CUDA-enabled COLMAP build"
-    : denseReadiness && !denseReadiness.ready
-      ? "Retry dense reconstruction with better capture"
-    : sparseStatus !== "Sparse Reconstruction Complete"
-      ? "Continue with sparse preview"
-      : denseStatus === "Dense Reconstruction Failed"
-        ? "Prepare visual preview inputs for the planned Gaussian Splat integration"
-        : "Retry dense reconstruction with better capture";
+  const denseRecommendedPath = "Advanced / legacy diagnostics only. Use RealityScan for client-quality geometry.";
   const denseLogEntries = Object.entries(reconstruction?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
   const visualReadiness = visualPreview?.readiness;
   const visualManifest = visualPreview?.visualPreview;
@@ -286,25 +278,25 @@ export default function ViewerPage() {
   const autoPreviewMode: Exclude<PreviewMode, "auto"> = project?.scan_type === "Building Scan" || ((summary?.imageCount ?? 0) >= 40 && (summary?.videoCount ?? 0) === 0) ? "exterior" : "interior";
   const activePreviewMode: Exclude<PreviewMode, "auto"> = scanPreviewMode === "auto" ? autoPreviewMode : scanPreviewMode;
   const outputType = activePointCloud?.source === "colmap_dense"
-    ? "Dense point cloud preview"
+    ? "Advanced dense diagnostic preview"
     : activePointCloud?.source === "colmap_sparse" && activePreviewMode === "exterior"
-      ? "Sparse building preview"
+      ? "Sparse validation preview"
       : sparseSceneAvailable
-        ? "Sparse scene preview"
+        ? "Sparse validation preview"
         : activePointCloud?.source === "colmap_sparse"
-          ? "Sparse point cloud preview"
-          : "No reconstruction output";
+          ? "Sparse validation point cloud"
+          : "No validation output";
   const hasPointCloud = Boolean(activePointCloud?.available && activePointCloud.points.length > 0);
-  const title = activePointCloud?.source === "colmap_dense" ? "Dense Point Cloud Preview" : activePreviewMode === "exterior" && hasPointCloud ? "Sparse Building Preview" : sparseSceneAvailable ? "Sparse Scene Preview" : hasPointCloud ? "Sparse Point Cloud Preview" : "No Reconstruction Output Yet";
+  const title = activePointCloud?.source === "colmap_dense" ? "Advanced Dense Diagnostic Preview" : activePreviewMode === "exterior" && hasPointCloud ? "Sparse Validation Preview" : sparseSceneAvailable ? "Sparse Validation Preview" : hasPointCloud ? "Sparse Validation Point Cloud" : "No Validation Output Yet";
   const explanation = activePointCloud?.source === "colmap_dense"
-    ? "This is a denser COLMAP point cloud reconstructed from the uploaded capture. It is not a mesh or finished production model yet."
+    ? "This is a legacy COLMAP dense diagnostic. It is not the primary client-quality model workflow."
     : activePreviewMode === "exterior" && hasPointCloud
-      ? "This is a real COLMAP sparse point cloud. Scale and orientation are arbitrary until aligned with the viewer controls."
+      ? "This is a real COLMAP sparse validation point cloud. Scale and orientation are arbitrary until aligned with the viewer controls."
       : sparseSceneAvailable
-      ? "This view uses the real COLMAP sparse reconstruction plus estimated room bounds to make the captured space easier to inspect. It is not a dense mesh yet."
+      ? "This view uses optional COLMAP sparse validation plus estimated room bounds to make capture coverage easier to inspect. It is not a final model."
       : hasPointCloud
-        ? "This is a real sparse point cloud reconstructed from the uploaded capture. It is not a dense mesh yet."
-    : "Upload media, process capture, then run sparse reconstruction to generate a real preview.";
+        ? "This is a real sparse validation point cloud from the uploaded capture. It is not the final model."
+    : "Upload media, process capture, then prepare a RealityScan job. Sparse validation is optional.";
   const registeredImageCount = reconstruction?.registeredImageCount ?? 0;
   const registrationRatioLabel = reconstruction?.registrationRatioLabel ?? "0%";
   const selectedFrameCount = reconstruction?.selectedFrameCount ?? reconstruction?.extractedFrameCount ?? inputFrameCount;
@@ -326,7 +318,7 @@ export default function ViewerPage() {
   ];
   const room = sceneAnalysis?.roomScaffold;
   const denseAvailabilityText = denseLikelyUnavailable
-    ? "Dense reconstruction requires a CUDA-enabled COLMAP build on this machine."
+    ? "Legacy dense COLMAP likely requires a CUDA-enabled COLMAP build on this machine."
     : denseLikelyAvailable === true
       ? "Dense reconstruction support appears available."
       : "Dense reconstruction support is unknown on this machine.";
@@ -422,9 +414,9 @@ export default function ViewerPage() {
   const renderReference = presentationMode ? false : showReference;
   const renderBoundingBox = presentationMode ? showBoundingBox : showBoundingBox;
   const selectedOutputDescription = outputSelection === "visual"
-    ? "Visual Preview prepares inputs for a future browser-viewable visual reconstruction. Full Gaussian Splat rendering is not implemented in this version."
+    ? "Legacy visual preview inputs are retained for experiment records only."
     : outputSelection === "dense"
-      ? "Dense / geometric model is a later output path and depends on a CUDA-capable dense reconstruction workflow."
+      ? "Advanced dense diagnostics are not the primary Structura model workflow."
       : explanation;
 
   return (
@@ -433,7 +425,7 @@ export default function ViewerPage() {
         <section>
           <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p className="text-sm text-brand">Future Inspection Viewer</p>
+              <p className="text-sm text-brand">Capture Validation Viewer</p>
               <h1 className="mt-2 text-3xl font-semibold text-white">{title}</h1>
               <p className="mt-2 text-sm text-slate-400">
                 {selectedOutputDescription}
@@ -459,27 +451,27 @@ export default function ViewerPage() {
               {([
                 {
                   key: "sparse",
-                  title: "Sparse point cloud preview",
+                  title: "Sparse Validation Preview",
                   status: sparseStatus,
                   readiness: hasSparsePointCloud ? "Ready" : sparseNotStarted ? "Not prepared" : "Check reconstruction",
-                  body: "Fast COLMAP point cloud for alignment, coverage, and demo inspection.",
-                  limitation: "Sparse points only; not a dense mesh."
+                  body: "Optional COLMAP point cloud for capture coverage and registration checks.",
+                  limitation: "Validation output only; not the final RealityScan model."
                 },
                 {
                   key: "visual",
-                  title: "Visual reconstruction preview",
+                  title: "Legacy visual preview",
                   status: visualManifestReady ? "Manifest ready" : visualStatus === "failed" ? "Failed" : "Not prepared",
                   readiness: visualExportStatus === "complete" ? "Export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Training running" : visualReadiness?.label ?? "Not evaluated",
-                  body: "Intended for a more realistic browser-viewable scene.",
-                  limitation: "Not a measurement-grade mesh; Gaussian Splat rendering is not implemented yet."
+                  body: "Retained for legacy experiment records only.",
+                  limitation: "Not a measurement-grade model."
                 },
                 {
                   key: "dense",
-                  title: "Dense / geometric model",
+                  title: "Advanced dense diagnostic",
                   status: denseStatus,
                   readiness: denseLikelyUnavailable ? "Not recommended with current COLMAP" : denseReady ? "Ready to try" : "Not ready",
-                  body: "Later path for denser geometry and model export.",
-                  limitation: "Current build may lack CUDA; mesh/GLB export is not implemented."
+                  body: "Legacy COLMAP diagnostic path.",
+                  limitation: "Use RealityScan artifacts for client-quality geometry."
                 }
               ] as const).filter((item) => SHOW_LEGACY_VISUAL_PREVIEW || item.key !== "visual").map((item) => (
                 <button
@@ -553,7 +545,7 @@ export default function ViewerPage() {
               </div>
             </div>
             <div className="mt-4 rounded-md border border-white/10 bg-white/[0.03] p-3 text-sm text-slate-300">
-              Next action: {reconstruction?.recommendedNextAction ?? "Run sparse reconstruction"}
+              Next action: {reconstruction?.recommendedNextAction ?? "Prepare RealityScan Job"}
             </div>
             {sparseQualityPoor && (
               <div className="mt-4 rounded-lg border border-red-400/30 bg-red-400/10 p-5 text-red-50">
@@ -760,14 +752,14 @@ export default function ViewerPage() {
                   </div>
                 </div>
                 <div className="mt-3 rounded-md border border-white/10 bg-white/[0.03] p-3 text-xs text-slate-300">
-                  {denseAvailabilityText} Next step: Install CUDA-enabled COLMAP or continue with visual preview pipeline.
+                  {denseAvailabilityText} Recommended path: prepare a RealityScan job and import the exported model artifact.
                 </div>
               </div>
             )}
             <div className="mt-4 rounded-md border border-white/10 bg-slate-950/60 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-white">Dense Readiness</p>
+                  <p className="text-sm font-semibold text-white">Legacy dense readiness</p>
                   <p className="mt-1 text-xs text-slate-400">{colmapCudaHint}</p>
                 </div>
                 <span className={`rounded-md border px-2.5 py-1 text-xs font-semibold ${denseLikelyUnavailable ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"}`}>
@@ -776,7 +768,7 @@ export default function ViewerPage() {
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-3">
                 <div>
-                  <p className="text-xs text-slate-500">Sparse reconstruction</p>
+                  <p className="text-xs text-slate-500">Sparse validation</p>
                   <p className="mt-1 text-sm font-semibold text-white">{sparseStatus === "Sparse Reconstruction Complete" ? "Complete" : "Incomplete"}</p>
                 </div>
                 <div>
@@ -817,9 +809,9 @@ export default function ViewerPage() {
                       {reconstructing ? <Loader2 size={18} className="animate-spin" /> : <Cpu size={18} />}
                     </span>
                     <div>
-                      <p className="text-sm font-semibold text-white">Ready for sparse reconstruction</p>
+                      <p className="text-sm font-semibold text-white">Ready for optional sparse validation</p>
                       <p className="mt-1 text-xs text-slate-400">
-                        Run COLMAP to generate a real sparse point cloud preview.
+                        Run COLMAP to generate a sparse validation point cloud.
                       </p>
                     </div>
                   </div>
@@ -828,11 +820,11 @@ export default function ViewerPage() {
                     onClick={onRunSparseReconstruction}
                     className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {reconstructing ? "Running COLMAP sparse reconstruction..." : "Run Sparse Reconstruction"}
+                    {reconstructing ? "Running..." : "Run Optional Sparse Validation"}
                   </button>
                 </div>
                 {!colmapAvailable && (
-                  <p className="mt-3 text-sm text-amber-100">COLMAP is required for sparse reconstruction.</p>
+                  <p className="mt-3 text-sm text-amber-100">COLMAP is required for optional sparse validation.</p>
                 )}
               </div>
             )}
@@ -840,15 +832,15 @@ export default function ViewerPage() {
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Ready for dense reconstruction</p>
-                    <p className="mt-1 text-xs text-slate-400">Dense reconstruction can take much longer than sparse reconstruction, especially without CUDA.</p>
+                    <p className="text-sm font-semibold text-white">Ready for legacy dense diagnostic</p>
+                    <p className="mt-1 text-xs text-slate-400">Dense COLMAP can take much longer than sparse validation, especially without CUDA.</p>
                   </div>
                   <button
                     disabled={denseReconstructing}
                     onClick={onRunDenseReconstruction}
                     className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {denseReconstructing ? "Running Dense Reconstruction..." : "Run Dense Reconstruction"}
+                    {denseReconstructing ? "Running..." : "Run Dense Reconstruction"}
                   </button>
                 </div>
                 {denseLikelyUnavailable && (
@@ -880,17 +872,17 @@ export default function ViewerPage() {
             )}
             {reconstructing && !showSparseAction && (
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-3 text-sm text-cyan-100">
-                Running COLMAP sparse reconstruction...
+                Running optional sparse validation...
               </div>
             )}
             {reconstruction?.status === "Sparse Reconstruction Complete" && hasPointCloud && (
               <div className="mt-4 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-3 text-sm text-emerald-100">
-                Sparse reconstruction complete. The viewer is now rendering the COLMAP sparse point cloud.
+                Sparse validation complete. The viewer is rendering the COLMAP sparse validation point cloud.
               </div>
             )}
             {(reconstructionError || reconstruction?.status === "Sparse Reconstruction Failed") && (
               <div className="mt-4 rounded-md border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-100">
-                <p className="font-semibold">Sparse reconstruction failed</p>
+                <p className="font-semibold">Sparse validation failed</p>
                 <p className="mt-1">{reconstruction?.errorMessage ?? reconstructionError}</p>
                 {(reconstruction?.likelyCauses ?? []).length > 0 && (
                   <p className="mt-2 text-xs text-red-100/80">Likely causes: {(reconstruction?.likelyCauses ?? []).join(", ")}.</p>

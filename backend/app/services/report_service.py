@@ -5,8 +5,10 @@ from typing import Any
 
 from app.repositories import annotation_repository, capture_repository, media_repository, project_repository, reconstruction_repository
 from app.database import get_connection
-from app.services import model_artifact_service, reconstruction_service, visual_preview_service
+from app.services import job_progress_service, model_artifact_service, reconstruction_service, visual_preview_service
 from app.services.processing_service import readiness_label
+
+REPORT_JOB_KEY = "report_generation"
 
 
 def _preview_mode(project: dict[str, Any], capture: dict[str, Any] | None, summary: dict[str, Any] | None = None) -> str:
@@ -25,57 +27,49 @@ def _preview_mode(project: dict[str, Any], capture: dict[str, Any] | None, summa
 def _detected_output(summary: dict[str, Any] | None, preview_mode: str = "interior") -> str:
     mode = summary["currentBestViewerMode"] if summary else "prototype_preview"
     if mode == "dense_point_cloud":
-        return "Dense point cloud preview"
+        return "Advanced dense point cloud diagnostic"
     if summary and summary.get("sparsePointCloudAvailable"):
         if preview_mode == "exterior":
-            return "Sparse building point cloud preview"
+            return "Sparse validation preview"
         points = int(summary.get("sparsePointCount") or summary.get("pointCount") or 0)
         if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction" or points < 1500:
-            return "Weak sparse reconstruction preview"
-        return "Sparse scene preview"
-    return "No reconstruction output"
+            return "Weak sparse validation result"
+        return "Sparse validation result"
+    return "No external model imported yet"
 
 
 def _limitations(summary: dict[str, Any] | None, preview_mode: str = "interior") -> list[str]:
     if summary and summary.get("currentBestViewerMode") == "dense_point_cloud":
         return [
-            "Dense point cloud reconstruction is enabled. Mesh generation and GLB export are not yet implemented.",
-            "Measurements are approximate in this prototype.",
+            "Advanced dense COLMAP output is a legacy diagnostic path, not the primary client-quality model workflow.",
+            "Progress percentages are not generated until a finished reference/current model pair is aligned and analyzed.",
         ]
     if summary and summary.get("sparsePointCloudAvailable"):
         if preview_mode == "exterior":
             return [
-                "COLMAP reconstruction has arbitrary scale and orientation unless aligned manually.",
-                "This is a sparse point cloud, not a dense mesh.",
-                "Measurements are approximate in this prototype.",
+                "Sparse validation has arbitrary scale and orientation unless aligned manually.",
+                "This is a validation point cloud, not the final client-quality RealityScan model.",
+                "Progress percentages are not generated from sparse validation.",
             ]
         return [
-            "Sparse reconstruction is enabled and has generated matched 3D feature points. The preview combines sparse COLMAP points with estimated room bounds.",
+            "Optional sparse validation generated matched 3D feature points for capture coverage checks.",
             "Room bounds and floor level are estimated from sparse features, not measured geometry or a generated mesh.",
-            "Measurements are approximate in this prototype.",
+            "Progress percentages are not generated until aligned external analysis is available.",
         ]
     return [
-        "No reconstructed point cloud is available yet. Upload media, process capture, then run sparse reconstruction to generate a real preview.",
-        "Measurements are approximate in this prototype.",
+        "No external RealityScan/model artifact is available yet. Prepare a RealityScan job, then import the exported OBJ/MTL/texture ZIP.",
+        "Progress percentages require a current/reference model pair, alignment, and distance or zone analysis.",
     ]
 
 
 def _report_next_action(summary: dict[str, Any] | None) -> str:
     if not summary:
-        return "Run sparse reconstruction"
+        return "Prepare RealityScan Job"
     if not summary.get("sparsePointCloudAvailable"):
-        return "Run sparse reconstruction"
-    if summary.get("denseStatus") == "Dense Reconstruction Failed" and summary.get("denseReconstructionLikelyAvailable") is False:
-        return "Install a CUDA-enabled COLMAP build or use a visual preview pipeline"
+        return "Prepare RealityScan Job"
     if summary.get("sparseQualityLabel") == "Poor Sparse Reconstruction":
-        return "Improve capture and rerun sparse reconstruction"
-    if summary.get("denseReconstructionLikelyAvailable") is False:
-        return "Continue sparse scene preview or install CUDA-enabled COLMAP"
-    if summary.get("denseStatus") in {"Dense Reconstruction Not Started", "Dense Reconstruction Running"}:
-        return "Run dense reconstruction"
-    if summary.get("denseReadiness", {}).get("ready"):
-        return "Run dense reconstruction"
-    return summary.get("recommendedNextAction") or "Run sparse reconstruction"
+        return "Prepare RealityScan Job; optionally improve capture and rerun sparse validation"
+    return "Prepare RealityScan Job"
 
 
 def _attempt_display_status(attempt: dict[str, Any]) -> str:
@@ -174,6 +168,7 @@ def _cache_key(
 ) -> str:
     attempts = reconstruction_summary.get("reconstructionAttempts", []) if reconstruction_summary else []
     payload = {
+        "reportUxVersion": 2,
         "project": {
             "id": project.get("id"),
             "name": project.get("name"),
@@ -267,19 +262,24 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     if not project:
         return None
 
+    job_progress_service.start(project_id, REPORT_JOB_KEY, "collecting_inputs", "Collecting report inputs", progress_percent=10)
     annotations = annotation_repository.list_annotations(project_id)
     media = media_repository.list_media(project_id)
     capture = capture_repository.get_capture_metadata(project_id)
+    job_progress_service.update(project_id, REPORT_JOB_KEY, stage="summarizing_reconstruction", label="Summarizing capture and sparse validation", progress_percent=30)
     reconstruction = reconstruction_repository.get_reconstruction_metadata(project_id)
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
+    job_progress_service.update(project_id, REPORT_JOB_KEY, stage="summarizing_artifacts", label="Summarizing model artifacts and comparison readiness", progress_percent=55)
     visual_preview = visual_preview_service.visual_preview_summary(project_id)
     model_artifacts = model_artifact_service.summary(project_id)
     cache_key = _cache_key(project, capture, annotations, reconstruction_summary, visual_preview, model_artifacts, len(media))
     cached = _get_cached_report(project_id, cache_key)
     if cached:
         cached["reportCacheStatus"] = "hit"
+        job_progress_service.complete(project_id, REPORT_JOB_KEY, "Report loaded from cache")
         return cached
 
+    job_progress_service.update(project_id, REPORT_JOB_KEY, stage="building_report", label="Building report", progress_percent=75)
     scene_analysis = _summary_scene_analysis(reconstruction_summary)
     preview_mode = _preview_mode(project, capture, reconstruction_summary)
     attempts = reconstruction_summary["reconstructionAttempts"] if reconstruction_summary else []
@@ -387,4 +387,5 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     }
     _store_cached_report(project_id, cache_key, report)
     report["reportCacheStatus"] = "miss"
+    job_progress_service.complete(project_id, REPORT_JOB_KEY, "Report generated")
     return report

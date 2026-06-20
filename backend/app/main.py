@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
 from app.repositories import annotation_repository, media_repository, model_artifact_repository, photogrammetry_job_repository, project_repository
-from app.services import comparison_analysis_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
+from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -255,6 +255,33 @@ def get_status(project_id: str) -> dict:
     return status
 
 
+@app.get("/projects/{project_id}/jobs/{job_key}/status")
+def get_job_status(project_id: str, job_key: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    status = job_progress_service.get(project_id, job_key)
+    if not status:
+        return {
+            "jobKey": job_key,
+            "projectId": project_id,
+            "status": "pending",
+            "currentStage": "not_started",
+            "currentStepLabel": "Not run yet.",
+            "progressPercent": None,
+            "startedAt": None,
+            "updatedAt": None,
+            "finishedAt": None,
+            "elapsedSeconds": 0,
+            "etaSeconds": None,
+            "processedItems": None,
+            "totalItems": None,
+            "logTail": [],
+            "warnings": [],
+            "errors": [],
+        }
+    return status
+
+
 @app.get("/projects/{project_id}/frames")
 def list_frames(project_id: str) -> list[dict[str, str]]:
     if not project_repository.get_project(project_id):
@@ -352,6 +379,7 @@ async def import_model_artifact(project_id: str, file: UploadFile | None = File(
             result = model_artifact_service.import_artifact(project_id, source, source.name, artifactType, sourceTool, notes, role)
         return result
     except model_artifact_service.ModelArtifactError as exc:
+        job_progress_service.fail(project_id, "model_artifact_import", str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

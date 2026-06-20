@@ -7,6 +7,7 @@ from PIL import Image
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR
 from app.repositories import capture_repository, media_repository, project_repository
+from app.services import job_progress_service
 
 FPS_MODES = {
     "Fast": 1,
@@ -27,6 +28,7 @@ PIPELINE_STEPS = [
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
 NEXT_STEP = "reconstruction"
+JOB_KEY = "capture_processing"
 
 
 class ProcessingError(Exception):
@@ -208,6 +210,14 @@ def start_processing(project_id: str, extraction_fps_mode: str | None = None) ->
     if not media:
         raise ProcessingError("Upload at least one image or video before processing.")
 
+    job_progress_service.start(
+        project_id,
+        JOB_KEY,
+        "preparing_workspace",
+        "Preparing capture workspace",
+        total_items=len(media),
+        progress_percent=5,
+    )
     project_repository.set_processing(project_id)
     paths = _project_workspace(project_id)
     _clear_frame_outputs(paths)
@@ -219,33 +229,73 @@ def start_processing(project_id: str, extraction_fps_mode: str | None = None) ->
     video_count = 0
     extraction_methods: set[str] = set()
 
-    for item in media:
-        source = UPLOADS_DIR / project_id / item["filename"]
-        if not source.exists():
-            raise ProcessingError(f"Uploaded media file is missing: {item['original_filename']}")
+    try:
+        for item_index, item in enumerate(media, start=1):
+            job_progress_service.update(
+                project_id,
+                JOB_KEY,
+                stage="extracting_frames",
+                label=f"Processing media {item_index}/{len(media)}",
+                progress_percent=10 + (item_index - 1) / max(len(media), 1) * 45,
+                processed_items=item_index - 1,
+                total_items=len(media),
+            )
+            source = UPLOADS_DIR / project_id / item["filename"]
+            if not source.exists():
+                raise ProcessingError(f"Uploaded media file is missing: {item['original_filename']}")
 
-        if item["media_type"] == "image":
-            target = paths["frames"] / f"frame_{frame_index:04d}.jpg"
-            _normalize_image(source, target)
-            image_count += 1
-            frame_index += 1
-            extraction_methods.add("image_upload")
-        elif item["media_type"] == "video":
-            suffix = source.suffix.lower()
-            if suffix not in VIDEO_EXTENSIONS:
-                raise ProcessingError("Video frame extraction supports .mp4, .mov, and .webm files.")
-            before = len(list(paths["frames"].glob("frame_*.jpg")))
-            after = _extract_video_frames(source, paths["frames"], frame_index, extraction_fps)
-            extracted = after - before
-            frame_index += extracted
-            video_count += 1
-            extraction_methods.add("ffmpeg")
+            if item["media_type"] == "image":
+                target = paths["frames"] / f"frame_{frame_index:04d}.jpg"
+                _normalize_image(source, target)
+                image_count += 1
+                frame_index += 1
+                extraction_methods.add("image_upload")
+            elif item["media_type"] == "video":
+                suffix = source.suffix.lower()
+                if suffix not in VIDEO_EXTENSIONS:
+                    raise ProcessingError("Video frame extraction supports .mp4, .mov, and .webm files.")
+                before = len(list(paths["frames"].glob("frame_*.jpg")))
+                after = _extract_video_frames(source, paths["frames"], frame_index, extraction_fps)
+                extracted = after - before
+                frame_index += extracted
+                video_count += 1
+                extraction_methods.add("ffmpeg")
+            job_progress_service.update(
+                project_id,
+                JOB_KEY,
+                label=f"Processed media {item_index}/{len(media)}",
+                progress_percent=10 + item_index / max(len(media), 1) * 45,
+                processed_items=item_index,
+            )
 
-    frames = sorted(paths["frames"].glob("frame_*.jpg"))
-    for frame in frames:
-        _thumbnail(frame, paths["thumbnails"] / frame.name)
+        frames = sorted(paths["frames"].glob("frame_*.jpg"))
+        total_frames = len(frames)
+        job_progress_service.update(
+            project_id,
+            JOB_KEY,
+            stage="generating_thumbnails",
+            label=f"Generating thumbnails for {total_frames} frames",
+            progress_percent=60,
+            processed_items=0,
+            total_items=total_frames if total_frames else None,
+        )
+        for frame_index_for_progress, frame in enumerate(frames, start=1):
+            _thumbnail(frame, paths["thumbnails"] / frame.name)
+            if total_frames and (frame_index_for_progress == total_frames or frame_index_for_progress % 10 == 0):
+                job_progress_service.update(
+                    project_id,
+                    JOB_KEY,
+                    label=f"Generated thumbnail {frame_index_for_progress}/{total_frames}",
+                    progress_percent=60 + frame_index_for_progress / max(total_frames, 1) * 20,
+                    processed_items=frame_index_for_progress,
+                    total_items=total_frames,
+                )
 
-    quality = _quality_metrics(frames)
+        job_progress_service.update(project_id, JOB_KEY, stage="analyzing_capture", label="Analyzing capture quality", progress_percent=85, processed_items=None, total_items=None)
+        quality = _quality_metrics(frames)
+    except Exception as exc:
+        job_progress_service.fail(project_id, JOB_KEY, str(exc))
+        raise
     warning_list = _warnings(
         len(frames),
         image_count,
@@ -274,6 +324,7 @@ def start_processing(project_id: str, extraction_fps_mode: str | None = None) ->
     )
 
     project_repository.set_ready(project_id)
+    job_progress_service.complete(project_id, JOB_KEY, "Capture processing complete", warnings=warning_list)
     return get_status(project_id, capture)
 
 
@@ -289,6 +340,7 @@ def get_status(project_id: str, capture: dict[str, Any] | None = None) -> dict[s
         "projectId": project_id,
         "status": project["status"],
         "progress": 100 if capture_prepared else 0,
+        "jobProgress": job_progress_service.get(project_id, JOB_KEY),
         "currentStep": PIPELINE_STEPS[-1] if capture_prepared else PIPELINE_STEPS[0],
         "steps": PIPELINE_STEPS,
         "nextStep": NEXT_STEP if capture_prepared else None,

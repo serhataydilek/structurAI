@@ -52,6 +52,26 @@ export type ProcessingStatus = {
   warnings?: string[];
   workspacePrepared?: boolean;
   readinessLabel?: ReadinessLabel;
+  jobProgress?: JobProgress | null;
+};
+
+export type JobProgress = {
+  jobKey: string;
+  projectId: string;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  currentStage: string;
+  currentStepLabel: string;
+  progressPercent: number | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+  finishedAt?: string | null;
+  elapsedSeconds: number;
+  etaSeconds: number | null;
+  processedItems?: number | null;
+  totalItems?: number | null;
+  logTail: string[];
+  warnings: string[];
+  errors: string[];
 };
 
 export type Annotation = {
@@ -88,7 +108,7 @@ export type ModelArtifact = {
 export type ModelArtifactSummary = { artifacts: ModelArtifact[]; measurementArtifactCount: number; latestDensePointCloud: ModelArtifact | null; latestMesh: ModelArtifact | null; latestReferenceModel: ModelArtifact | null; latestCurrentStateModel: ModelArtifact | null; comparisonReady: boolean; comparisonCount: number; latestComparison: { comparisonId: string; status: string } | null; message: string };
 export type ArtifactComparison = { comparisonId: string; projectId: string; referenceArtifactId: string; currentArtifactId: string; status: string; notes: string; createdAt: string; updatedAt: string; referenceArtifact: ModelArtifact; currentArtifact: ModelArtifact; comparable: boolean; warning?: string | null; recommendation: string; analysisStatus?: string; warnings?: string[]; roughBoundsDelta?: { referenceSize?: Record<string,number>; currentSize?: Record<string,number>; scaleRatios?: number[] } | null; scaleMismatchWarning?: string | null; noProgressPercentageReason?: string | null };
 export type RealityScanDiagnostics = { realityScanAvailable: boolean; resolvedRealityScanExe: string | null; source: string; versionHelpOutput?: string | null; supportsHeadless: boolean | "unknown"; supportsCommandFile: boolean | "unknown"; outputWriteable: boolean; errors: string[] };
-export type PhotogrammetryJob = { jobId: string; projectId: string; engine: string; status: string; inputImageFolder: string; outputFolder: string; commandFilePath?: string | null; logPath?: string | null; logTail: string; notes: string; errors: string[]; imageCount?: number; ready?: boolean; manualRequired?: boolean };
+export type PhotogrammetryJob = { jobId: string; projectId: string; engine: string; status: string; inputImageFolder: string; outputFolder: string; commandFilePath?: string | null; logPath?: string | null; logTail: string; notes: string; errors: string[]; imageCount?: number; ready?: boolean; manualRequired?: boolean; progress?: JobProgress | null };
 
 export type Diagnostics = {
   product: string;
@@ -243,6 +263,9 @@ export type ReconstructionSummary = {
   recommendedFixes?: string[];
   recommendedNextAction?: string;
   nextStep: string;
+  jobProgress?: JobProgress | null;
+  sweepProgress?: JobProgress | null;
+  denseProgress?: JobProgress | null;
 };
 
 export type VisualPreviewReadiness = {

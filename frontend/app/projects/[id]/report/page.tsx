@@ -182,18 +182,18 @@ export default function ReportPage() {
           </section>
 
           <section className="mt-8">
-            <h2 className="font-semibold text-white">Reconstruction output</h2>
+            <h2 className="font-semibold text-white">Capture validation and model readiness</h2>
             <div className="mt-3 grid gap-4 md:grid-cols-5">
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs text-slate-500">Sparse status</p>
+                <p className="text-xs text-slate-500">Sparse validation</p>
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseStatus ?? report?.reconstructionMetadata?.status ?? "Not Started"}</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs text-slate-500">Dense status</p>
+                <p className="text-xs text-slate-500">Legacy dense diagnostic</p>
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.denseStatus ?? "Dense Reconstruction Not Started"}</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs text-slate-500">Sparse points</p>
+                <p className="text-xs text-slate-500">Sparse validation points</p>
                 <p className="mt-2 text-2xl font-semibold text-white">{report?.reconstructionMetadata?.sparsePointCount ?? report?.reconstructionMetadata?.pointCount ?? 0}</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -202,7 +202,7 @@ export default function ReportPage() {
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Next action</p>
-                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.recommendedNextAction ?? "Run sparse reconstruction"}</p>
+                <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.recommendedNextAction ?? "Prepare RealityScan Job"}</p>
               </div>
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-4">
@@ -220,7 +220,7 @@ export default function ReportPage() {
                 <p className="mt-1 text-xs text-slate-500">{report?.reconstructionMetadata?.sourceFrameCount ?? report?.reconstructionMetadata?.extractedFrameCount ?? 0} source frames</p>
               </div>
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-                <p className="text-xs text-slate-500">Sparse quality</p>
+                <p className="text-xs text-slate-500">Sparse validation quality</p>
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseQualityLabel ?? "Not Started"}</p>
               </div>
             </div>

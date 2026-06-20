@@ -6,12 +6,14 @@ import zipfile
 
 from app.database import PROCESSED_DIR
 from app.repositories import model_artifact_repository
+from app.services import job_progress_service
 
 ALLOWED_EXTENSIONS = {".ply", ".obj", ".zip"}
 ZIP_ALLOWED_EXTENSIONS = {".obj", ".mtl", ".jpg", ".jpeg", ".png", ".webp", ".rsinfo"}
 ARTIFACT_TYPES = {"dense_point_cloud", "textured_mesh", "mesh", "gaussian_splat", "unknown"}
 SOURCE_TOOLS = {"realitycapture", "realityscan", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
 ROLES = {"current_state", "finished_reference", "baseline", "comparison_result"}
+JOB_KEY = "model_artifact_import"
 
 
 class ModelArtifactError(Exception):
@@ -142,6 +144,7 @@ def _import_obj_bundle(project_id: str, source_path: Path, original_name: str, a
     if artifact_type != "textured_mesh":
         raise ModelArtifactError("ZIP bundles are supported only for textured_mesh artifacts")
     try:
+        job_progress_service.update(project_id, JOB_KEY, stage="validating_zip", label="Validating OBJ/MTL/texture ZIP", progress_percent=15)
         with zipfile.ZipFile(source_path) as archive:
             members = [info for info in archive.infolist() if not info.is_dir()]
             if len(members) > 5000:
@@ -161,16 +164,21 @@ def _import_obj_bundle(project_id: str, source_path: Path, original_name: str, a
             root = PROCESSED_DIR / project_id / "model_artifacts" / f"bundle_{uuid4()}"
             root.mkdir(parents=True, exist_ok=True)
             zip_target = root / Path(original_name).name
+            job_progress_service.update(project_id, JOB_KEY, stage="storing_source_zip", label="Storing source ZIP", progress_percent=25)
             shutil.copyfile(source_path, zip_target)
             extracted = root / "contents"
-            for info, member in validated:
+            job_progress_service.update(project_id, JOB_KEY, stage="extracting_bundle", label=f"Extracting bundle files: 0/{len(validated)}", progress_percent=30, processed_items=0, total_items=len(validated))
+            for index, (info, member) in enumerate(validated, start=1):
                 target = extracted.joinpath(*member.parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as src, target.open("wb") as dest:
                     shutil.copyfileobj(src, dest, length=1024 * 1024)
+                if index == len(validated) or index % 10 == 0:
+                    job_progress_service.update(project_id, JOB_KEY, label=f"Extracted file {index}/{len(validated)}", progress_percent=30 + index / max(len(validated), 1) * 40, processed_items=index, total_items=len(validated))
     except zipfile.BadZipFile as exc:
         raise ModelArtifactError("Uploaded ZIP is invalid") from exc
     main_info, main_member = max(obj_members, key=lambda item: item[0].file_size)
+    job_progress_service.update(project_id, JOB_KEY, stage="locating_model_files", label="Locating main OBJ, MTL, and textures", progress_percent=75, processed_items=None, total_items=None)
     main_obj = extracted.joinpath(*main_member.parts)
     mtl_members = [member for _, member in validated if member.suffix.lower() == ".mtl"]
     textures = [member for _, member in validated if member.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
@@ -179,8 +187,13 @@ def _import_obj_bundle(project_id: str, source_path: Path, original_name: str, a
         "mtlPath": str(extracted.joinpath(*mtl_members[0].parts)) if mtl_members else None,
         "textureFiles": [str(member) for member in textures], "textureCount": len(textures), "mtlFound": bool(mtl_members),
     }
-    return model_artifact_repository.add_artifact(project_id, artifact_type, source_tool, Path(original_name).name, zip_target.stat().st_size,
-        str(zip_target), str(zip_target.relative_to(PROCESSED_DIR)), notes, role, _parse_obj(main_obj), bundle)
+    job_progress_service.update(project_id, JOB_KEY, stage="parsing_obj_metadata", label="Parsing OBJ metadata", progress_percent=85)
+    stats = _parse_obj(main_obj)
+    job_progress_service.update(project_id, JOB_KEY, stage="storing_artifact_record", label="Storing artifact record", progress_percent=95)
+    artifact = model_artifact_repository.add_artifact(project_id, artifact_type, source_tool, Path(original_name).name, zip_target.stat().st_size,
+        str(zip_target), str(zip_target.relative_to(PROCESSED_DIR)), notes, role, stats, bundle)
+    job_progress_service.complete(project_id, JOB_KEY, "Model artifact import complete")
+    return artifact
 
 
 def parse_stats(path: Path) -> dict:
@@ -221,12 +234,16 @@ def comparison_candidate(artifact: dict) -> dict:
 
 
 def import_artifact(project_id: str, source_path: Path, original_name: str, artifact_type: str, source_tool: str, notes: str, role: str | None) -> dict:
+    job_progress_service.start(project_id, JOB_KEY, "upload_received", "Artifact upload received", progress_percent=5)
     if artifact_type not in ARTIFACT_TYPES or source_tool not in SOURCE_TOOLS or (role and role not in ROLES):
+        job_progress_service.fail(project_id, JOB_KEY, "Unsupported artifact type, source tool, or role")
         raise ModelArtifactError("Unsupported artifact type, source tool, or role")
     suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise ModelArtifactError("Only .ply and .obj model artifacts are supported")
+        job_progress_service.fail(project_id, JOB_KEY, "Only .ply, .obj, and textured .zip model artifacts are supported")
+        raise ModelArtifactError("Only .ply, .obj, and textured .zip model artifacts are supported")
     if not source_path.is_file():
+        job_progress_service.fail(project_id, JOB_KEY, "Artifact file was not found")
         raise ModelArtifactError("Artifact file was not found")
     if suffix == ".zip":
         return _import_obj_bundle(project_id, source_path, original_name, artifact_type, source_tool, notes, role)
@@ -234,9 +251,13 @@ def import_artifact(project_id: str, source_path: Path, original_name: str, arti
     target_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(original_name).name
     target = target_dir / f"{uuid4()}_{safe_name}"
+    job_progress_service.update(project_id, JOB_KEY, stage="storing_artifact_file", label="Storing artifact file", progress_percent=35)
     shutil.copyfile(source_path, target)
-    return model_artifact_repository.add_artifact(project_id, artifact_type, source_tool, safe_name, target.stat().st_size,
+    job_progress_service.update(project_id, JOB_KEY, stage="parsing_model_metadata", label="Parsing model metadata", progress_percent=75)
+    artifact = model_artifact_repository.add_artifact(project_id, artifact_type, source_tool, safe_name, target.stat().st_size,
         str(target), str(target.relative_to(PROCESSED_DIR)), notes, role, parse_stats(target))
+    job_progress_service.complete(project_id, JOB_KEY, "Model artifact import complete")
+    return artifact
 
 
 def summary(project_id: str) -> dict:

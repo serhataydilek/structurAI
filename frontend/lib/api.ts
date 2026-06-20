@@ -1,4 +1,4 @@
-import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, ModelArtifact, ModelArtifactSummary, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -83,6 +83,10 @@ export function startProcessing(projectId: string, options?: { extractionFpsMode
 
 export function getProcessingStatus(projectId: string) {
   return request<ProcessingStatus>(`/projects/${projectId}/status`);
+}
+
+export function getJobStatus(projectId: string, jobKey: string) {
+  return request<JobProgress>(`/projects/${projectId}/jobs/${jobKey}/status`);
 }
 
 export function getFrames(projectId: string) {
