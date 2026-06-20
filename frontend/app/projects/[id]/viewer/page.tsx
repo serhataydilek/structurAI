@@ -23,6 +23,8 @@ const identityViewerTransform: ViewerTransform = {
   offsetZ: 0
 };
 
+const SHOW_LEGACY_VISUAL_PREVIEW = false;
+
 function normalizeViewerTransform(transform?: Partial<ViewerTransform>): ViewerTransform {
   return { ...identityViewerTransform, ...(transform ?? {}) };
 }
@@ -445,14 +447,11 @@ export default function ViewerPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-white">Outputs</p>
-                <p className="mt-1 text-xs text-slate-400">Sparse, visual, and dense outputs are tracked separately.</p>
+                <p className="mt-1 text-xs text-slate-400">Use the sparse viewer for capture validation; import client-quality geometry through Model Artifacts.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
                   Model Artifacts
-                </Link>
-                <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
-                  Visual Preview page
                 </Link>
               </div>
             </div>
@@ -482,7 +481,7 @@ export default function ViewerPage() {
                   body: "Later path for denser geometry and model export.",
                   limitation: "Current build may lack CUDA; mesh/GLB export is not implemented."
                 }
-              ] as const).map((item) => (
+              ] as const).filter((item) => SHOW_LEGACY_VISUAL_PREVIEW || item.key !== "visual").map((item) => (
                 <button
                   key={item.key}
                   type="button"
@@ -936,7 +935,7 @@ export default function ViewerPage() {
                 ))}
               </div>
             )}
-            {outputSelection === "visual" && (
+            {SHOW_LEGACY_VISUAL_PREVIEW && outputSelection === "visual" && (
               <div className="mt-4 rounded-md border border-brand/25 bg-brand/10 p-4">
                 {visualManifestReady ? (
                   <div>
@@ -1196,7 +1195,7 @@ export default function ViewerPage() {
               </div>
             </div>
           )}
-          {outputSelection === "visual" ? (
+          {SHOW_LEGACY_VISUAL_PREVIEW && outputSelection === "visual" ? (
             <div className="flex h-[540px] items-center justify-center rounded-lg border border-white/10 bg-slate-950 p-8 text-center shadow-glow">
               <div>
                 <p className="text-xl font-semibold text-white">{visualExportStatus === "complete" ? "Gaussian Splat export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Visual Preview training running" : visualManifestReady ? "Visual Preview manifest ready" : "Visual Preview not prepared"}</p>

@@ -26,6 +26,20 @@ export default function ReportPage() {
   const selectedRegistrationPercent = Math.round((report?.reconstructionMetadata?.selectedRegistrationRatio ?? report?.reconstructionMetadata?.registrationRatio ?? 0) * 100);
   const visualPreview = report?.reconstructionMetadata?.visualPreview;
   const visualReadiness = report?.reconstructionMetadata?.visualPreviewReadiness;
+  const artifactSummary = report?.modelArtifactSummary;
+  const currentModel = artifactSummary?.latestCurrentStateModel;
+  const referenceModel = artifactSummary?.latestReferenceModel;
+  const measurementComparisonCount = artifactSummary?.comparisonCount ?? 0;
+  const legacyPreviewArtifacts = artifactSummary?.artifacts.filter((item) => item.artifactType === "gaussian_splat" || item.stats.gaussianSplatDetected) ?? [];
+  const readinessMessage = !artifactSummary?.measurementArtifactCount
+    ? "No measurement-grade dense point cloud or mesh has been imported yet."
+    : currentModel && !referenceModel
+      ? `Current-state ${currentModel.sourceTool === "realityscan" ? "RealityScan" : ""} model imported. Add a finished reference model to enable progress comparison.`
+      : referenceModel && !currentModel
+        ? "Finished reference imported. Current-state model is still needed."
+        : measurementComparisonCount > 0
+          ? "Comparison record exists. External alignment/distance analysis required; internal point cloud distance engine pending."
+          : "Reference and current-state models are available. Create a comparison record from Model Artifacts.";
   const photoSetRecommendations = [
     "Take 40-80 sharp photos.",
     "Keep 60-70% overlap between photos.",
@@ -210,7 +224,7 @@ export default function ReportPage() {
                 <p className="mt-2 text-sm font-semibold text-white">{report?.reconstructionMetadata?.sparseQualityLabel ?? "Not Started"}</p>
               </div>
             </div>
-            <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <div className="hidden">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs text-slate-500">Visual Preview</p>
@@ -243,6 +257,26 @@ export default function ReportPage() {
               <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-semibold text-cyan-50">External model artifacts</p><p className="mt-1 text-sm text-cyan-100/75">{report.modelArtifactSummary?.artifacts.length ?? 0} imported · {report.comparisonReadiness ? "Comparison foundation ready" : "Import a finished reference and current-state model to prepare comparison"}</p></div><Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Manage artifacts</Link></div>
               <p className="mt-3 text-xs text-cyan-100/70">No progress percentage is shown until aligned external distance analysis is available.</p>
             </div>
+            <section className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><p className="text-sm font-semibold text-cyan-50">Measurement / Progress Readiness</p><p className="mt-1 text-sm text-cyan-100/75">{artifactSummary?.artifacts.length ?? 0} imported artifact(s) · {artifactSummary?.measurementArtifactCount ?? 0} measurement-grade candidate(s)</p></div>
+                <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Manage Model Artifacts</Link>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className={`rounded p-3 text-xs ${(artifactSummary?.measurementArtifactCount ?? 0) > 0 ? "bg-emerald-300/10 text-emerald-100" : "bg-white/[0.05] text-slate-400"}`}>1. Measurement artifact imported</div>
+                <div className={`rounded p-3 text-xs ${artifactSummary?.comparisonReady ? "bg-emerald-300/10 text-emerald-100" : "bg-white/[0.05] text-slate-400"}`}>2. Reference + current pair ready</div>
+                <div className={`rounded p-3 text-xs ${measurementComparisonCount > 0 ? "bg-emerald-300/10 text-emerald-100" : "bg-white/[0.05] text-slate-400"}`}>3. Comparison record created</div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Current-state model</p><p className="mt-1 text-sm font-semibold text-white">{currentModel?.fileName ?? "Missing"}</p></div>
+                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Finished reference model</p><p className="mt-1 text-sm font-semibold text-white">{referenceModel?.fileName ?? "Missing"}</p></div>
+                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Dense point cloud</p><p className="mt-1 text-sm font-semibold text-white">{artifactSummary?.latestDensePointCloud?.fileName ?? "None"}</p></div>
+                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Mesh / textured mesh</p><p className="mt-1 text-sm font-semibold text-white">{artifactSummary?.latestMesh?.fileName ?? "None"}</p></div>
+              </div>
+              <p className="mt-4 text-sm text-cyan-50">{readinessMessage}</p>
+              <p className="mt-2 text-xs text-cyan-100/70">This is readiness tracking, not a construction progress percentage. No completed or missing zones are inferred.</p>
+              {legacyPreviewArtifacts.length > 0 && <details className="mt-4 text-xs text-slate-400"><summary className="cursor-pointer text-slate-300">Legacy preview artifacts ({legacyPreviewArtifacts.length})</summary><p className="mt-2">{legacyPreviewArtifacts.map((item) => item.fileName).join(", ")} — Gaussian Splat preview-only artifacts; not measurement-grade.</p></details>}
+            </section>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-xs text-slate-500">Frame selection</p>

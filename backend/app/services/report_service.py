@@ -10,7 +10,7 @@ from app.services.processing_service import readiness_label
 
 
 def _preview_mode(project: dict[str, Any], capture: dict[str, Any] | None, summary: dict[str, Any] | None = None) -> str:
-    attempt_mode = (summary or {}).get("displayedAttempt", {}).get("viewerPreviewMode") or (summary or {}).get("bestAttempt", {}).get("viewerPreviewMode")
+    attempt_mode = ((summary or {}).get("displayedAttempt") or {}).get("viewerPreviewMode") or ((summary or {}).get("bestAttempt") or {}).get("viewerPreviewMode")
     if attempt_mode == "exterior":
         return "exterior"
     if attempt_mode == "interior":
@@ -169,6 +169,7 @@ def _cache_key(
     annotations: list[dict[str, Any]],
     reconstruction_summary: dict[str, Any] | None,
     visual_preview_summary: dict[str, Any] | None,
+    model_artifact_summary: dict[str, Any],
     media_count: int,
 ) -> str:
     attempts = reconstruction_summary.get("reconstructionAttempts", []) if reconstruction_summary else []
@@ -214,7 +215,7 @@ def _cache_key(
             "denseLogs": (reconstruction_summary or {}).get("denseLogPreviewSummary"),
             "denseError": (reconstruction_summary or {}).get("denseErrorMessage"),
         },
-            "visualPreview": {
+        "visualPreview": {
             "status": (visual_preview_summary or {}).get("status"),
             "visualPreviewId": (((visual_preview_summary or {}).get("visualPreview") or {}).get("visualPreviewId")),
             "manifestPath": (((visual_preview_summary or {}).get("visualPreview") or {}).get("manifestPath")),
@@ -223,6 +224,12 @@ def _cache_key(
             "exportStatus": (((visual_preview_summary or {}).get("visualPreview") or {}).get("exportStatus")),
             "splatOutputPath": (((visual_preview_summary or {}).get("visualPreview") or {}).get("splatOutputPath")),
             "readiness": (visual_preview_summary or {}).get("readiness"),
+        },
+        "modelArtifacts": {
+            "artifacts": [{"id": item.get("artifactId"), "role": item.get("role"), "type": item.get("artifactType"), "updated": item.get("updatedAt")} for item in model_artifact_summary.get("artifacts", [])],
+            "comparisonReady": model_artifact_summary.get("comparisonReady"),
+            "comparisonCount": model_artifact_summary.get("comparisonCount"),
+            "latestComparison": (model_artifact_summary.get("latestComparison") or {}).get("comparisonId"),
         },
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
@@ -267,7 +274,7 @@ def build_report(project_id: str) -> dict[str, Any] | None:
     reconstruction_summary = reconstruction_service.reconstruction_summary(project_id)
     visual_preview = visual_preview_service.visual_preview_summary(project_id)
     model_artifacts = model_artifact_service.summary(project_id)
-    cache_key = _cache_key(project, capture, annotations, reconstruction_summary, visual_preview, len(media))
+    cache_key = _cache_key(project, capture, annotations, reconstruction_summary, visual_preview, model_artifacts, len(media))
     cached = _get_cached_report(project_id, cache_key)
     if cached:
         cached["reportCacheStatus"] = "hit"

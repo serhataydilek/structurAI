@@ -7,12 +7,15 @@ Use this flow for a portfolio or GitHub demo of Structura AI v0.4.
 1. Capture building photos.
 2. Validate capture in Structura.
 3. Process the high-quality dense point cloud or mesh in RealityCapture, Metashape, Pix4D, or a similar photogrammetry tool.
-4. Open **External Model Artifacts** in Structura and import the `.ply` or `.obj` output.
-5. Mark one artifact as `finished_reference` and another as `current_state`.
-6. Create the comparison record.
-7. Generate the report.
+4. Export an OBJ + MTL + texture bundle as one ZIP (or a dense `.ply`).
+5. Open **Model Artifacts** in Structura and import the external output.
+6. Mark one artifact as `finished_reference` and another as `current_state`.
+7. Review **Measurement / Progress Readiness** and create a comparison record only when both roles exist.
+8. Generate the report.
 
-The comparison record is intentionally a foundation only: no automatic progress percentage or geometry distance is claimed. Align and analyze the models in CloudCompare (or a future internal Open3D-style distance engine). Gaussian Splat remains an optional visual preview, not a measurement source.
+The comparison record is intentionally a foundation only: no automatic progress percentage or geometry distance is claimed. Align and analyze the models in CloudCompare (or a future internal Open3D-style distance engine). Structura uses external photogrammetry engines for client-quality geometry. For a RealityScan textured mesh, export OBJ + MTL + textures in one ZIP and import it as `textured_mesh`; high-poly ZIPs are managed artifacts, not browser-rendered models.
+
+RealityScan automation foundation: open **RealityScan Jobs**, prepare the project job, process the prepared input folder in RealityScan, export the OBJ bundle ZIP, then import it in Model Artifacts. Full headless automation depends on verified local CLI support.
 
 ## Start Local Services
 
@@ -56,9 +59,9 @@ Open `http://localhost:3000`.
 Structura AI v0.1 turns a local capture into a COLMAP sparse reconstruction workflow. The South Building demo registered `128/128` images and generated about `85k` sparse points. The viewer is showing a sparse building point cloud preview, not a dense mesh or textured model.
 
 The report is cached and uses precomputed reconstruction metadata, so it avoids reparsing the large point cloud on every report load. Dense reconstruction is shown as CUDA-aware readiness because the current local COLMAP build is installed without CUDA.
-# Visual Preview: Nerfstudio/Splatfacto
+# Legacy experiment: Nerfstudio/Splatfacto
 
-Dense reconstruction remains de-emphasized unless COLMAP has CUDA support. The Visual Preview path uses the successful South Building sparse attempt as input for Nerfstudio Splatfacto.
+Nerfstudio/Splatfacto remains documented only for legacy experimentation. It is not part of the main Structura demo or measurement workflow: use RealityScan/external photogrammetry artifacts instead.
 
 1. Start the backend with `NERFSTUDIO_PYTHON`, `NERFSTUDIO_NS_TRAIN`, and `NERFSTUDIO_NS_EXPORT` set.
 2. Call `/visual-preview/diagnostics` and confirm CUDA, `ns-train`, and `ns-export` are available.

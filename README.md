@@ -1,15 +1,25 @@
 # Structura AI
 
-## v0.4: Two-pipeline model workflow
+## v0.4: External photogrammetry model workflow
 
-Structura separates visual preview from measurement/progress work:
+Structura uses external photogrammetry engines for client-quality geometry. Its active workflow is:
 
-- **Visual Preview:** COLMAP + Nerfstudio Splatfacto / Gaussian Splat. Useful for visual inspection only; it is not measurement-grade geometry.
-- **Measurement / Progress:** import dense point clouds (`.ply`) or meshes (`.ply`, `.obj`) created in RealityCapture, Metashape, Pix4D, CloudCompare, or a comparable tool. Structura stores artifact metadata, provides safe downloads, and records reference-vs-current comparisons without inventing a progress percentage.
+- Capture and optional sparse reconstruction validation.
+- RealityScan, Metashape, Pix4D, CloudCompare, or a comparable external engine for dense geometry.
+- OBJ + MTL + texture ZIP or dense PLY import into Model Artifacts.
+- Current/reference roles, measurement readiness, and future comparison.
 
 Recommended immediate workflow: capture photos; validate capture in Structura; create a high-quality model in RealityCapture/Metashape/Pix4D; import it; mark the finished reference and current state; create a comparison record; then generate the report. Alignment and point-cloud distance analysis remain external (for example CloudCompare) until the internal comparison engine is implemented.
 
+RealityScan automation is currently a foundation: Structura diagnoses `REALITYSCAN_EXE`, prepares a project job folder, and provides a manual workflow bridge. Full headless automation depends on verified local CLI support.
+
 v0.4 supports importing artifacts and creating comparison records. Real progress measurement requires externally generated dense point clouds or meshes; Gaussian Splat exports remain preview-only.
+
+For RealityScan, Metashape, and Pix4D textured exports, upload one ZIP that keeps the OBJ, MTL, and texture images together. High-poly exports can be very large; ZIP import manages the source artifact only and does not add a heavy browser viewer. Create a simplified or medium-resolution derivative later for web presentation.
+
+## Viewer-ready model guidance
+
+Keep the high-poly RealityScan export as the archive/reference artifact. Do not use a roughly 7M-face model directly in a browser viewer. Create a simplified web/demo export first, targeting **300k to 1M faces**, then export OBJ + MTL + textures as one ZIP and import it as `textured_mesh / realityscan / current_state` with notes such as `web/demo model`.
 
 Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos or video, prepare frames, run COLMAP sparse reconstruction, track attempts, choose the best result, view a sparse building point cloud, and generate a cached scan report. The current demo proves a practical sparse reconstruction workflow without claiming a finished dense mesh or production inspection model.
 
@@ -46,17 +56,17 @@ Structura AI v0.1 is a local capture-to-reconstruction prototype: upload photos 
 
 This version produces sparse point cloud previews, not dense meshes or textured 3D models yet.
 
-## Roadmap
+## Product direction
 
 - v0.1 Sparse reconstruction demo
-- v0.2 Visual Preview foundation
-- v0.2 Visual Preview training adapter with Nerfstudio Splatfacto
-- Planned: Dense geometric reconstruction
-- Planned: Reference vs Current comparison
+- External textured mesh and dense-cloud artifact management
+- RealityScan OBJ/MTL/texture ZIP bundle import
+- Reference vs. current-state readiness
+- Future: aligned point-cloud/mesh distance analysis
 
-## v0.2 Visual Preview Training Adapter
+## Legacy experiment: Nerfstudio / Gaussian Splat
 
-Visual Preview can prepare a Nerfstudio dataset from Structura's best COLMAP sparse attempt and launch Nerfstudio Splatfacto as an external training tool.
+Nerfstudio/Splatfacto was explored as an experimental visual-preview path. It is not the Structura product path: Gaussian Splats are not measurement-grade and are not used for progress comparison. Legacy endpoints and files remain for compatibility only.
 
 - Requires Nerfstudio/Splatfacto installed outside Structura.
 - Uses Structura COLMAP sparse output and registered images.
@@ -93,7 +103,7 @@ $env:NERFSTUDIO_NS_TRAIN="C:\Users\serfu\miniconda3\envs\nerfstudio\Scripts\ns-t
 $env:NERFSTUDIO_NS_EXPORT="C:\Users\serfu\miniconda3\envs\nerfstudio\Scripts\ns-export.exe"
 ```
 
-Visual Preview flow:
+Legacy-only flow:
 
 1. Run a successful sparse reconstruction and keep the best attempt selected.
 2. Open Visual Preview and confirm diagnostics show Nerfstudio, `ns-train`, `ns-export`, and CUDA available.
@@ -119,8 +129,8 @@ Training presets:
 - Sparse reconstruction attempt tracking
 - Best attempt scoring and default selection
 - Sparse experiment sweep for comparing frame-selection strategies
-- Visual Preview manifest preparation from strong or usable sparse attempts
-- Nerfstudio Splatfacto training/export adapter for Visual Preview
+- External dense point cloud / textured mesh artifact import
+- RealityScan OBJ + MTL + texture ZIP bundle handling
 - Exterior/building sparse point cloud viewer
 - Manual viewer orientation save per attempt
 - Presentation mode for clean demo screenshots
@@ -131,10 +141,8 @@ Training presets:
 ## Honest Limitations
 
 - Current output is a sparse point cloud preview.
-- Visual Preview training requires Nerfstudio. Gaussian Splat output is available only after training and export succeed.
-- In-browser Gaussian Splat rendering is not implemented yet.
-- It is not a dense mesh yet.
-- It is not a textured model yet.
+- Gaussian Splat output is legacy preview-only and not measurement-grade.
+- High-poly external meshes are managed artifacts; a heavy browser viewer is not implemented.
 - Scale and orientation are arbitrary unless aligned manually in the viewer.
 - Measurements are approximate prototype values.
 - Dense stereo reconstruction realistically requires a CUDA-enabled COLMAP build on this machine.
@@ -190,13 +198,11 @@ If diagnostics says COLMAP is installed `without CUDA`, sparse reconstruction ca
 10. Enable `Presentation mode`.
 11. Open the report.
 12. Explain the result: `128/128 registered images, 85k sparse points`.
-13. Open Visual Preview.
-14. Confirm Nerfstudio diagnostics are green.
-15. Prepare the South Building visual preview dataset from the best sparse attempt.
-16. Train Splatfacto with the `demo` preset, then export the Gaussian Splat `.ply`.
-17. Download `splat.ply` and open it in an external Gaussian Splat viewer such as SuperSplat or Polycam.
-
-The Visual Preview export is a real Nerfstudio/Splatfacto artifact. Structura does not render Gaussian Splats internally yet; the browser renderer is pending and no fake preview is shown.
+13. Process the South Building capture in RealityScan or another external photogrammetry engine.
+14. Export OBJ + MTL + textures as one ZIP.
+15. Import it into Model Artifacts as `textured_mesh` with `sourceTool = realityscan`.
+16. Mark it `current_state`, then add a separate `finished_reference` artifact when available.
+17. Review Measurement / Progress Readiness in the report.
 
 ## API Validation Commands
 

@@ -82,10 +82,13 @@ export type ModelArtifact = {
   sourceTool: string; fileName: string; fileSize: number; storagePath: string; relativePath: string; notes: string; role?: "current_state" | "finished_reference" | "baseline" | "comparison_result" | null;
   stats: { vertexCount?: number; faceCount?: number | null; hasColor?: boolean; gaussianSplatDetected?: boolean; boundingBox?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null; statsPartial?: boolean };
   importWarning?: string;
+  bundle?: { originalZipPath?: string; bundleRootPath?: string; mainObjPath?: string; mtlPath?: string | null; textureFiles?: string[]; textureCount?: number; mtlFound?: boolean };
   createdAt: string; updatedAt: string;
 };
-export type ModelArtifactSummary = { artifacts: ModelArtifact[]; latestDensePointCloud: ModelArtifact | null; latestMesh: ModelArtifact | null; latestReferenceModel: ModelArtifact | null; latestCurrentStateModel: ModelArtifact | null; comparisonReady: boolean; message: string };
-export type ArtifactComparison = { comparisonId: string; projectId: string; referenceArtifactId: string; currentArtifactId: string; status: string; notes: string; createdAt: string; updatedAt: string; referenceArtifact: ModelArtifact; currentArtifact: ModelArtifact; comparable: boolean; warning?: string | null; recommendation: string };
+export type ModelArtifactSummary = { artifacts: ModelArtifact[]; measurementArtifactCount: number; latestDensePointCloud: ModelArtifact | null; latestMesh: ModelArtifact | null; latestReferenceModel: ModelArtifact | null; latestCurrentStateModel: ModelArtifact | null; comparisonReady: boolean; comparisonCount: number; latestComparison: { comparisonId: string; status: string } | null; message: string };
+export type ArtifactComparison = { comparisonId: string; projectId: string; referenceArtifactId: string; currentArtifactId: string; status: string; notes: string; createdAt: string; updatedAt: string; referenceArtifact: ModelArtifact; currentArtifact: ModelArtifact; comparable: boolean; warning?: string | null; recommendation: string; analysisStatus?: string; warnings?: string[]; roughBoundsDelta?: { referenceSize?: Record<string,number>; currentSize?: Record<string,number>; scaleRatios?: number[] } | null; scaleMismatchWarning?: string | null; noProgressPercentageReason?: string | null };
+export type RealityScanDiagnostics = { realityScanAvailable: boolean; resolvedRealityScanExe: string | null; source: string; versionHelpOutput?: string | null; supportsHeadless: boolean | "unknown"; supportsCommandFile: boolean | "unknown"; outputWriteable: boolean; errors: string[] };
+export type PhotogrammetryJob = { jobId: string; projectId: string; engine: string; status: string; inputImageFolder: string; outputFolder: string; commandFilePath?: string | null; logPath?: string | null; logTail: string; notes: string; errors: string[]; imageCount?: number; ready?: boolean; manualRequired?: boolean };
 
 export type Diagnostics = {
   product: string;

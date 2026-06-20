@@ -88,7 +88,7 @@ export default function DashboardPage() {
           <p className="text-sm text-brand">Scan Projects</p>
           <h1 className="mt-2 text-3xl font-semibold text-white">Capture processing dashboard</h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
-            This prototype prepares captures, runs COLMAP sparse reconstruction, and presents sparse point cloud previews with cached reports.
+            Structura validates captures, manages external photogrammetry artifacts, and reports measurement/progress readiness. Client-quality geometry comes from RealityScan, Metashape, Pix4D, or similar tools.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -174,10 +174,13 @@ export default function DashboardPage() {
               </div>
               <p className="mt-4 text-sm text-slate-400">Created {new Date(project.created_at).toLocaleDateString()}</p>
               <p className="mt-2 text-xs text-slate-500">Status: {statusLabel(project.status)}</p>
-              <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/10 pt-4 text-sm">
-                <Link href={projectRoute(project)} className="inline-flex items-center gap-2 text-cyan-100 hover:text-brand">
-                  Open project <ArrowRight size={16} />
-                </Link>
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4 text-sm">
+                <div className="flex gap-3">
+                  <Link href={projectRoute(project)} className="inline-flex items-center gap-2 text-cyan-100 hover:text-brand">
+                    Open project <ArrowRight size={16} />
+                  </Link>
+                  <Link href={`/projects/${project.id}/model-artifacts`} className="text-slate-300 hover:text-brand">Model Artifacts</Link>
+                </div>
                 <button onClick={() => onDelete(project)} className="inline-flex items-center gap-2 rounded-md border border-red-400/30 px-3 py-2 text-xs font-semibold text-red-100 hover:bg-red-400/10">
                   <Trash2 size={14} /> Delete
                 </button>

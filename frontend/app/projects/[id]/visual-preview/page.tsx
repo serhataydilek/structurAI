@@ -132,10 +132,10 @@ export default function VisualPreviewPage() {
         </div>
 
         <div className="glass-panel mt-5 rounded-lg p-8">
-          <p className="text-sm text-brand">Visual Preview Foundation</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">{project?.name ?? "Visual preview"}</h1>
+          <p className="text-sm text-amber-100">Legacy experimental preview</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">{project?.name ?? "Legacy preview"}</h1>
           <p className="mt-3 text-sm leading-6 text-slate-400">
-            Visual reconstruction preview is intended for a more realistic browser-viewable scene. It is not a measurement-grade mesh.
+            This Nerfstudio/Gaussian Splat experiment is retained for legacy records only. Use Model Artifacts and external photogrammetry outputs for the active product workflow.
           </p>
 
           <section className="mt-8 rounded-lg border border-white/10 bg-white/[0.03] p-5">

@@ -1,13 +1,16 @@
 from pathlib import Path
 import shutil
+from pathlib import PurePosixPath
 from uuid import uuid4
+import zipfile
 
 from app.database import PROCESSED_DIR
 from app.repositories import model_artifact_repository
 
-ALLOWED_EXTENSIONS = {".ply", ".obj"}
+ALLOWED_EXTENSIONS = {".ply", ".obj", ".zip"}
+ZIP_ALLOWED_EXTENSIONS = {".obj", ".mtl", ".jpg", ".jpeg", ".png", ".webp", ".rsinfo"}
 ARTIFACT_TYPES = {"dense_point_cloud", "textured_mesh", "mesh", "gaussian_splat", "unknown"}
-SOURCE_TOOLS = {"realitycapture", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
+SOURCE_TOOLS = {"realitycapture", "realityscan", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
 ROLES = {"current_state", "finished_reference", "baseline", "comparison_result"}
 
 
@@ -103,23 +106,81 @@ def _parse_ascii_ply(path: Path) -> dict:
 
 
 def _parse_obj(path: Path) -> dict:
-    vertices, faces, has_color = [], 0, False
+    vertex_count, faces, has_color = 0, 0, False
+    minimum = [float("inf"), float("inf"), float("inf")]
+    maximum = [float("-inf"), float("-inf"), float("-inf")]
     with path.open("r", encoding="utf-8", errors="ignore") as file:
-        for index, line in enumerate(file):
-            if index > 500000:
-                break
+        for line in file:
             if line.startswith("v "):
                 parts = line.split()
                 if len(parts) >= 4:
                     try:
-                        vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                        coordinates = (float(parts[1]), float(parts[2]), float(parts[3]))
+                        vertex_count += 1
+                        for index, value in enumerate(coordinates):
+                            minimum[index] = min(minimum[index], value)
+                            maximum[index] = max(maximum[index], value)
                         has_color = has_color or len(parts) >= 7
                     except ValueError:
                         pass
             elif line.startswith("f "):
                 faces += 1
-    return {"vertexCount": len(vertices), "faceCount": faces, "boundingBox": _bounds(vertices), "hasColor": has_color,
-            "statsPartial": path.stat().st_size > 100 * 1024 * 1024}
+    bounding_box = None if vertex_count == 0 else {"min": {"x": minimum[0], "y": minimum[1], "z": minimum[2]}, "max": {"x": maximum[0], "y": maximum[1], "z": maximum[2]}}
+    return {"vertexCount": vertex_count, "faceCount": faces, "boundingBox": bounding_box, "hasColor": has_color, "statsPartial": False}
+
+
+def _safe_zip_member(name: str) -> PurePosixPath:
+    normalized = name.replace("\\", "/")
+    member = PurePosixPath(normalized)
+    if member.is_absolute() or ".." in member.parts or not member.parts:
+        raise ModelArtifactError("ZIP contains an unsafe path")
+    return member
+
+
+def _import_obj_bundle(project_id: str, source_path: Path, original_name: str, artifact_type: str, source_tool: str,
+                       notes: str, role: str | None) -> dict:
+    if artifact_type != "textured_mesh":
+        raise ModelArtifactError("ZIP bundles are supported only for textured_mesh artifacts")
+    try:
+        with zipfile.ZipFile(source_path) as archive:
+            members = [info for info in archive.infolist() if not info.is_dir()]
+            if len(members) > 5000:
+                raise ModelArtifactError("ZIP contains too many files")
+            total_size = sum(info.file_size for info in members)
+            if total_size > 8 * 1024 * 1024 * 1024:
+                raise ModelArtifactError("ZIP uncompressed size exceeds the 8 GB import limit")
+            validated: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
+            for info in members:
+                member = _safe_zip_member(info.filename)
+                if member.suffix.lower() not in ZIP_ALLOWED_EXTENSIONS:
+                    raise ModelArtifactError(f"ZIP contains unsupported file: {member.name}")
+                validated.append((info, member))
+            obj_members = [(info, member) for info, member in validated if member.suffix.lower() == ".obj"]
+            if not obj_members:
+                raise ModelArtifactError("Textured mesh ZIP must contain an .obj file")
+            root = PROCESSED_DIR / project_id / "model_artifacts" / f"bundle_{uuid4()}"
+            root.mkdir(parents=True, exist_ok=True)
+            zip_target = root / Path(original_name).name
+            shutil.copyfile(source_path, zip_target)
+            extracted = root / "contents"
+            for info, member in validated:
+                target = extracted.joinpath(*member.parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as src, target.open("wb") as dest:
+                    shutil.copyfileobj(src, dest, length=1024 * 1024)
+    except zipfile.BadZipFile as exc:
+        raise ModelArtifactError("Uploaded ZIP is invalid") from exc
+    main_info, main_member = max(obj_members, key=lambda item: item[0].file_size)
+    main_obj = extracted.joinpath(*main_member.parts)
+    mtl_members = [member for _, member in validated if member.suffix.lower() == ".mtl"]
+    textures = [member for _, member in validated if member.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}]
+    bundle = {
+        "originalZipPath": str(zip_target), "bundleRootPath": str(extracted), "mainObjPath": str(main_obj),
+        "mtlPath": str(extracted.joinpath(*mtl_members[0].parts)) if mtl_members else None,
+        "textureFiles": [str(member) for member in textures], "textureCount": len(textures), "mtlFound": bool(mtl_members),
+    }
+    return model_artifact_repository.add_artifact(project_id, artifact_type, source_tool, Path(original_name).name, zip_target.stat().st_size,
+        str(zip_target), str(zip_target.relative_to(PROCESSED_DIR)), notes, role, _parse_obj(main_obj), bundle)
 
 
 def parse_stats(path: Path) -> dict:
@@ -152,6 +213,12 @@ def _is_gaussian_splat(artifact: dict) -> bool:
         return detected
     return False
 
+def comparison_candidate(artifact: dict) -> dict:
+    model_path = Path((artifact.get("bundle") or {}).get("mainObjPath") or artifact["storagePath"])
+    preview = _is_gaussian_splat(artifact)
+    measurement = artifact["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not preview and model_path.is_file()
+    return {"artifactId":artifact["artifactId"],"artifactType":artifact["artifactType"],"sourceTool":artifact["sourceTool"],"role":artifact["role"],"vertexCount":(artifact.get("stats") or {}).get("vertexCount"),"faceCount":(artifact.get("stats") or {}).get("faceCount"),"bounds":(artifact.get("stats") or {}).get("boundingBox"),"measurementCandidate":measurement,"texturedMeshOrDensePointCloud":artifact["artifactType"] in {"textured_mesh","dense_point_cloud"},"gaussianSplatPreviewOnly":preview,"modelFileExists":model_path.is_file()}
+
 
 def import_artifact(project_id: str, source_path: Path, original_name: str, artifact_type: str, source_tool: str, notes: str, role: str | None) -> dict:
     if artifact_type not in ARTIFACT_TYPES or source_tool not in SOURCE_TOOLS or (role and role not in ROLES):
@@ -161,6 +228,8 @@ def import_artifact(project_id: str, source_path: Path, original_name: str, arti
         raise ModelArtifactError("Only .ply and .obj model artifacts are supported")
     if not source_path.is_file():
         raise ModelArtifactError("Artifact file was not found")
+    if suffix == ".zip":
+        return _import_obj_bundle(project_id, source_path, original_name, artifact_type, source_tool, notes, role)
     target_dir = PROCESSED_DIR / project_id / "model_artifacts"
     target_dir.mkdir(parents=True, exist_ok=True)
     safe_name = Path(original_name).name
@@ -175,13 +244,30 @@ def summary(project_id: str) -> dict:
     for artifact in artifacts:
         if _is_gaussian_splat(artifact) and artifact["artifactType"] != "gaussian_splat":
             artifact["importWarning"] = "Gaussian Splat header detected. Preview-only. Not measurement-grade; do not use as finished/current progress comparison input."
-    latest = lambda predicate: next((item for item in artifacts if predicate(item)), None)
-    reference = latest(lambda item: item["role"] == "finished_reference")
-    current = latest(lambda item: item["role"] == "current_state")
-    return {"artifacts": artifacts, "latestDensePointCloud": latest(lambda item: item["artifactType"] == "dense_point_cloud"),
-            "latestMesh": latest(lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
-            "latestCurrentStateModel": current, "comparisonReady": bool(reference and current),
-            "message": "Comparison foundation ready" if reference and current else "Import and mark a finished reference and current-state model to prepare comparison."}
+    measurement_artifacts = [item for item in artifacts if item["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not _is_gaussian_splat(item)]
+    latest = lambda collection, predicate: next((item for item in collection if predicate(item)), None)
+    reference = latest(measurement_artifacts, lambda item: item["role"] == "finished_reference")
+    current = latest(measurement_artifacts, lambda item: item["role"] == "current_state")
+    comparisons = model_artifact_repository.list_comparisons(project_id)
+    measurement_ids = {item["artifactId"] for item in measurement_artifacts}
+    measurement_comparisons = [item for item in comparisons if item["referenceArtifactId"] in measurement_ids and item["currentArtifactId"] in measurement_ids and item["referenceArtifactId"] != item["currentArtifactId"]]
+    comparison_ready = bool(reference and current and reference["artifactId"] != current["artifactId"])
+    if current and not reference:
+        message = "Current-state model imported. Finished reference model is still needed."
+    elif reference and not current:
+        message = "Finished reference imported. Current-state model is still needed."
+    elif comparison_ready and not measurement_comparisons:
+        message = "Reference and current-state models are available. Create a comparison record from Model Artifacts."
+    elif measurement_comparisons:
+        message = "Comparison foundation ready. External alignment/distance analysis required."
+    else:
+        message = "Progress comparison requires two distinct artifacts: a finished reference and a current-state model."
+    return {"artifacts": artifacts, "measurementArtifactCount": len(measurement_artifacts),
+            "comparisonCandidates": [comparison_candidate(item) for item in artifacts],
+            "latestDensePointCloud": latest(measurement_artifacts, lambda item: item["artifactType"] == "dense_point_cloud"),
+            "latestMesh": latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
+            "latestCurrentStateModel": current, "comparisonReady": comparison_ready, "comparisonCount": len(measurement_comparisons),
+            "latestComparison": measurement_comparisons[0] if measurement_comparisons else None, "message": message}
 
 
 def comparison_detail(project_id: str, comparison: dict) -> dict:

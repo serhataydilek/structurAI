@@ -189,6 +189,7 @@ def init_db() -> None:
                 notes TEXT NOT NULL DEFAULT '',
                 role TEXT,
                 stats_json TEXT NOT NULL DEFAULT '{}',
+                bundle_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -206,6 +207,15 @@ def init_db() -> None:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (reference_artifact_id) REFERENCES model_artifacts(artifact_id),
                 FOREIGN KEY (current_artifact_id) REFERENCES model_artifacts(artifact_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS photogrammetry_jobs (
+                job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL,
+                input_image_folder TEXT NOT NULL, output_folder TEXT NOT NULL, command_file_path TEXT,
+                command_used TEXT, log_path TEXT, log_tail TEXT NOT NULL DEFAULT '', started_at TEXT,
+                finished_at TEXT, duration_seconds REAL, produced_artifact_id TEXT, notes TEXT NOT NULL DEFAULT '',
+                errors_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
             """
         )
@@ -241,6 +251,15 @@ def init_db() -> None:
         _ensure_column(conn, "visual_preview_outputs", "splat_output_path", "TEXT")
         _ensure_column(conn, "visual_preview_outputs", "splat_output_size_bytes", "INTEGER")
         _ensure_column(conn, "visual_preview_outputs", "viewer_asset_path", "TEXT")
+        _ensure_column(conn, "model_artifacts", "bundle_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "artifact_comparisons", "analysis_status", "TEXT NOT NULL DEFAULT 'not_started'")
+        _ensure_column(conn, "artifact_comparisons", "analysis_summary_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "artifact_comparisons", "warnings_json", "TEXT NOT NULL DEFAULT '[]'")
+        _ensure_column(conn, "artifact_comparisons", "reference_bounds_json", "TEXT")
+        _ensure_column(conn, "artifact_comparisons", "current_bounds_json", "TEXT")
+        _ensure_column(conn, "artifact_comparisons", "rough_bounds_delta_json", "TEXT")
+        _ensure_column(conn, "artifact_comparisons", "scale_mismatch_warning", "TEXT")
+        _ensure_column(conn, "artifact_comparisons", "no_progress_percentage_reason", "TEXT")
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

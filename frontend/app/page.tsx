@@ -11,10 +11,10 @@ const pipeline = [
   "Phone Photos / Video",
   "Upload Service",
   "Frame Extraction",
-  "COLMAP Sparse Reconstruction",
-  "Sparse Point Cloud Preview",
-  "Viewer + Report",
-  "AI Annotations & Reports"
+  "Optional Sparse Validation",
+  "RealityScan / External Photogrammetry",
+  "OBJ + MTL + Texture ZIP",
+  "Model Artifacts + Readiness Report"
 ];
 
 export default function LandingPage() {
@@ -41,11 +41,10 @@ export default function LandingPage() {
             Structura AI
           </h1>
           <p className="mt-5 max-w-2xl text-2xl text-cyan-100">
-            Local capture to sparse building previews.
+            Capture validation and external client-quality building models.
           </p>
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">
-            Structura AI converts photos and videos into COLMAP sparse point cloud previews for inspection,
-            renovation, and construction progress review.
+            Structura AI manages capture quality, external photogrammetry artifacts, and honest progress readiness for inspection, renovation, and construction workflows.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/projects/new" className="inline-flex items-center gap-2 rounded-md bg-brand px-5 py-3 font-semibold text-ink hover:bg-cyan-200">
@@ -61,8 +60,8 @@ export default function LandingPage() {
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-5">
             <div className="mb-5 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">Sparse preview prototype</p>
-                <p className="text-xs text-slate-400">Building scan workflow</p>
+                <p className="text-sm font-medium text-white">External photogrammetry workflow</p>
+                <p className="text-xs text-slate-400">Client-quality geometry through RealityScan and similar tools</p>
               </div>
               <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">Ready</span>
             </div>
@@ -96,7 +95,7 @@ export default function LandingPage() {
             <Cpu className="text-brand" size={22} />
             <div>
               <h2 className="text-xl font-semibold text-white">Reconstruction Pipeline</h2>
-              <p className="text-sm text-slate-400">Built around real local processing, COLMAP sparse reconstruction, and honest prototype limitations.</p>
+              <p className="text-sm text-slate-400">Structura uses external photogrammetry engines for client-quality geometry.</p>
             </div>
           </div>
           <div className="grid gap-3 lg:grid-cols-7">
@@ -108,7 +107,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-5 text-sm text-slate-400">
-            Current pipeline: FFmpeg, frame selection, COLMAP sparse reconstruction, attempt tracking, sparse viewer, and cached reports.
+            Current pipeline: capture validation, optional sparse reconstruction, RealityScan-style model generation, ZIP artifact import, and readiness reporting.
           </p>
         </div>
       </section>

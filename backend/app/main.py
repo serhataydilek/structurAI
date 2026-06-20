@@ -10,8 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, media_repository, model_artifact_repository, project_repository
-from app.services import model_artifact_service, processing_service, reconstruction_service, report_service, visual_preview_service
+from app.repositories import annotation_repository, media_repository, model_artifact_repository, photogrammetry_job_repository, project_repository
+from app.services import comparison_analysis_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -129,8 +129,23 @@ def diagnostics() -> dict:
         "colmap": colmap,
     }
 
+@app.get("/photogrammetry/realityscan/diagnostics")
+def realityscan_diagnostics() -> dict:
+    return realityscan_service.diagnostics()
 
-@app.get("/visual-preview/diagnostics")
+@app.post("/projects/{project_id}/photogrammetry/realityscan/prepare")
+def prepare_realityscan_job(project_id: str) -> dict:
+    if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
+    try: return realityscan_service.prepare(project_id)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/projects/{project_id}/photogrammetry/realityscan/jobs")
+def list_realityscan_jobs(project_id: str) -> list[dict]:
+    if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
+    return photogrammetry_job_repository.list_jobs(project_id)
+
+
+@app.get("/visual-preview/diagnostics", deprecated=True)
 def visual_preview_diagnostics() -> dict:
     return visual_preview_service.diagnostics()
 
@@ -308,7 +323,7 @@ def get_reconstruction_summary(project_id: str) -> dict:
     return summary
 
 
-@app.get("/projects/{project_id}/visual-preview-summary")
+@app.get("/projects/{project_id}/visual-preview-summary", deprecated=True)
 def get_visual_preview_summary(project_id: str) -> dict:
     summary = visual_preview_service.visual_preview_summary(project_id)
     if not summary:
@@ -380,9 +395,15 @@ def create_comparison(project_id: str, payload: ComparisonCreate) -> dict:
         raise HTTPException(status_code=404, detail="Project not found")
     if payload.status not in {"pending", "ready", "requires_external_analysis", "completed", "failed"}:
         raise HTTPException(status_code=400, detail="Unsupported comparison status")
-    if not model_artifact_repository.get_artifact(project_id, payload.referenceArtifactId) or not model_artifact_repository.get_artifact(project_id, payload.currentArtifactId):
+    if payload.referenceArtifactId == payload.currentArtifactId:
+        raise HTTPException(status_code=400, detail="Comparison requires two distinct artifacts")
+    reference = model_artifact_repository.get_artifact(project_id, payload.referenceArtifactId); current = model_artifact_repository.get_artifact(project_id, payload.currentArtifactId)
+    if not reference or not current:
         raise HTTPException(status_code=404, detail="Comparison artifact not found")
-    return model_artifact_service.comparison_detail(project_id, model_artifact_repository.add_comparison(project_id, payload.referenceArtifactId, payload.currentArtifactId, payload.status, payload.notes))
+    if not model_artifact_service.comparison_candidate(reference)["measurementCandidate"] or not model_artifact_service.comparison_candidate(current)["measurementCandidate"]:
+        raise HTTPException(status_code=400, detail="Comparisons require two measurement-grade artifacts with available model files")
+    analysis = comparison_analysis_service.metadata_analysis(reference, current)
+    return model_artifact_service.comparison_detail(project_id, model_artifact_repository.add_comparison(project_id, payload.referenceArtifactId, payload.currentArtifactId, payload.status, payload.notes, analysis))
 
 
 @app.get("/projects/{project_id}/comparisons")
@@ -400,7 +421,7 @@ def get_comparison(project_id: str, comparison_id: str) -> dict:
     return model_artifact_service.comparison_detail(project_id, comparison)
 
 
-@app.post("/projects/{project_id}/visual-preview/prepare")
+@app.post("/projects/{project_id}/visual-preview/prepare", deprecated=True)
 def prepare_visual_preview(project_id: str) -> dict:
     try:
         return visual_preview_service.prepare_visual_preview(project_id)
@@ -409,7 +430,7 @@ def prepare_visual_preview(project_id: str) -> dict:
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
-@app.post("/projects/{project_id}/visual-preview/train")
+@app.post("/projects/{project_id}/visual-preview/train", deprecated=True)
 def train_visual_preview(project_id: str, payload: VisualPreviewTrainPayload | None = None) -> dict:
     try:
         return visual_preview_service.train_visual_preview(
@@ -424,7 +445,7 @@ def train_visual_preview(project_id: str, payload: VisualPreviewTrainPayload | N
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
-@app.get("/projects/{project_id}/visual-preview/training-status")
+@app.get("/projects/{project_id}/visual-preview/training-status", deprecated=True)
 def get_visual_preview_training_status(project_id: str) -> dict:
     try:
         return visual_preview_service.training_status(project_id)
@@ -433,7 +454,7 @@ def get_visual_preview_training_status(project_id: str) -> dict:
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
-@app.post("/projects/{project_id}/visual-preview/export")
+@app.post("/projects/{project_id}/visual-preview/export", deprecated=True)
 def export_visual_preview(project_id: str, payload: VisualPreviewExportPayload | None = None) -> dict:
     try:
         return visual_preview_service.export_visual_preview(
@@ -445,7 +466,7 @@ def export_visual_preview(project_id: str, payload: VisualPreviewExportPayload |
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
-@app.get("/projects/{project_id}/visual-preview/splat-file/metadata")
+@app.get("/projects/{project_id}/visual-preview/splat-file/metadata", deprecated=True)
 def get_visual_preview_splat_metadata(project_id: str, visual_preview_id: str | None = None) -> dict:
     try:
         return visual_preview_service.exported_splat_metadata(project_id, visual_preview_id)
@@ -454,7 +475,7 @@ def get_visual_preview_splat_metadata(project_id: str, visual_preview_id: str | 
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
-@app.get("/projects/{project_id}/visual-preview/splat-file")
+@app.get("/projects/{project_id}/visual-preview/splat-file", deprecated=True)
 def download_visual_preview_splat(project_id: str, visual_preview_id: str | None = None) -> FileResponse:
     try:
         splat_path = visual_preview_service.exported_splat_file(project_id, visual_preview_id)

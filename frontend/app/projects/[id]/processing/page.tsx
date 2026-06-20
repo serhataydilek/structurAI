@@ -239,14 +239,11 @@ export default function ProcessingPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-white">Outputs</h2>
-              <p className="mt-1 text-sm text-slate-400">Structura tracks sparse preview, visual preview, and dense/geometric output separately.</p>
+              <p className="mt-1 text-sm text-slate-400">Use sparse reconstruction for capture validation, then import client-quality external geometry in Model Artifacts.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
                 Model Artifacts
-              </Link>
-              <Link href={`/projects/${params.id}/visual-preview`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
-                Visual Preview
               </Link>
             </div>
           </div>
