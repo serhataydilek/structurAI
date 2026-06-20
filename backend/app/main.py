@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, media_repository, model_artifact_repository, photogrammetry_job_repository, project_repository
+from app.repositories import annotation_repository, capture_repository, media_repository, model_artifact_repository, photogrammetry_job_repository, project_repository
 from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
@@ -260,6 +260,10 @@ def get_job_status(project_id: str, job_key: str) -> dict:
     if not project_repository.get_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
     status = job_progress_service.get(project_id, job_key)
+    if job_key == "capture_processing" and status and status.get("status") == "running":
+        capture = capture_repository.get_capture_metadata(project_id)
+        if capture:
+            return job_progress_service.complete(project_id, job_key, "Capture processing complete", warnings=capture.get("warnings") or [])
     if not status:
         return {
             "jobKey": job_key,

@@ -37,6 +37,7 @@ export default function ProcessingPage() {
   const [sparseProgress, setSparseProgress] = useState<JobProgress | null>(null);
   const [sweepProgress, setSweepProgress] = useState<JobProgress | null>(null);
   const [denseProgress, setDenseProgress] = useState<JobProgress | null>(null);
+  const [realityScanProgress, setRealityScanProgress] = useState<JobProgress | null>(null);
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -49,6 +50,7 @@ export default function ProcessingPage() {
     getJobStatus(params.id, "sparse_validation").then(setSparseProgress).catch(() => undefined);
     getJobStatus(params.id, "sparse_experiment_sweep").then(setSweepProgress).catch(() => undefined);
     getJobStatus(params.id, "dense_reconstruction").then(setDenseProgress).catch(() => undefined);
+    getJobStatus(params.id, "realityscan_prepare").then(setRealityScanProgress).catch(() => undefined);
   }, [params.id]);
 
   useEffect(() => {
@@ -146,20 +148,22 @@ export default function ProcessingPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (!autoProcessing && !reconstructing && !sweeping && !denseReconstructing) return;
+    if (!autoProcessing && !reconstructing && !sweeping && !denseReconstructing && captureProgress?.status !== "running" && sparseProgress?.status !== "running" && sweepProgress?.status !== "running" && denseProgress?.status !== "running" && realityScanProgress?.status !== "running") return;
     let active = true;
     const poll = async () => {
-      const [capture, sparse, sweep, dense] = await Promise.all([
+    const [capture, sparse, sweep, dense, realityScan] = await Promise.all([
         getJobStatus(params.id, "capture_processing").catch(() => null),
         getJobStatus(params.id, "sparse_validation").catch(() => null),
         getJobStatus(params.id, "sparse_experiment_sweep").catch(() => null),
-        getJobStatus(params.id, "dense_reconstruction").catch(() => null)
+        getJobStatus(params.id, "dense_reconstruction").catch(() => null),
+        getJobStatus(params.id, "realityscan_prepare").catch(() => null)
       ]);
       if (!active) return;
       if (capture) setCaptureProgress(capture);
       if (sparse) setSparseProgress(sparse);
       if (sweep) setSweepProgress(sweep);
       if (dense) setDenseProgress(dense);
+      if (realityScan) setRealityScanProgress(realityScan);
       window.setTimeout(() => {
         if (active) poll().catch(() => undefined);
       }, 1500);
@@ -168,7 +172,7 @@ export default function ProcessingPage() {
     return () => {
       active = false;
     };
-  }, [params.id, autoProcessing, reconstructing, sweeping, denseReconstructing]);
+  }, [params.id, autoProcessing, reconstructing, sweeping, denseReconstructing, captureProgress?.status, sparseProgress?.status, sweepProgress?.status, denseProgress?.status, realityScanProgress?.status]);
 
   const progress = status?.progress ?? 0;
   const hasFrames = (summary?.extractedFrameCount ?? status?.extractedFrameCount ?? 0) > 0;
@@ -215,7 +219,38 @@ export default function ProcessingPage() {
   ];
   const videoModeRecommendations = ["60-90 seconds", "Balanced 2 FPS", "Video Sequential matching", "Balanced subset"];
   const photoModeRecommendations = ["40-80 images", "Photo Exhaustive matching", "All frames or Balanced subset"];
-
+  const rawCaptureProgress = captureProgress ?? status?.jobProgress ?? null;
+  const captureReady = Boolean(hasFrames || status?.workspacePrepared || summary?.workspacePrepared);
+  const viewerAction = sparseComplete
+    ? { href: `/projects/${params.id}/viewer`, label: "Open Capture Validation Viewer" }
+    : captureReady
+      ? { href: "#capture-review", label: "Open Capture Review" }
+      : null;
+  const normalizedCaptureProgress =
+    captureReady && rawCaptureProgress?.status === "running"
+      ? {
+          ...rawCaptureProgress,
+          status: "completed" as JobProgress["status"],
+          currentStage: "capture_complete",
+          currentStepLabel: "Capture processing complete",
+          progressPercent: 100,
+          etaSeconds: null,
+          finishedAt: rawCaptureProgress.finishedAt ?? rawCaptureProgress.updatedAt
+        }
+      : rawCaptureProgress;
+  const sparseValidationLabel = sparseComplete
+    ? `${(reconstruction?.sparseQualityLabel ?? "Complete").replace(" Sparse Reconstruction", "")}, ${reconstruction?.registeredImageCount ?? 0}/${reconstruction?.selectedFrameCount ?? reconstruction?.inputFrameCount ?? 0}, ${(reconstruction?.sparsePointCount ?? 0).toLocaleString()} points`
+    : reconstruction?.sparseStatus === "Sparse Reconstruction Failed"
+      ? "Failed"
+      : "Not run yet";
+  const topProgress =
+    sparseProgress?.status === "running"
+      ? { progress: sparseProgress, title: "Sparse validation progress", eta: "ETA unknown while COLMAP is matching or mapping images." }
+      : realityScanProgress?.status === "running"
+        ? { progress: realityScanProgress, title: "RealityScan job preparation progress", eta: undefined }
+        : normalizedCaptureProgress?.status === "running"
+          ? { progress: normalizedCaptureProgress, title: "Capture processing progress", eta: undefined }
+          : null;
   async function onRunSparseReconstruction() {
     setReconstructing(true);
     setReconstructionError("");
@@ -278,8 +313,43 @@ export default function ProcessingPage() {
         <div className="glass-panel mt-8 rounded-lg p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-white">Recommended workflow</h2>
-              <p className="mt-1 text-sm text-slate-400">RealityScan or another external photogrammetry tool is the primary geometry path. Sparse validation is optional.</p>
+              <p className="text-sm text-slate-400">Status</p>
+              <h2 className="mt-1 text-xl font-semibold text-white">
+                {topProgress ? topProgress.title : captureReady ? "Capture processing complete" : "Capture processing not run yet"}
+              </h2>
+            </div>
+            <span className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-1 text-sm text-slate-200">
+              {topProgress?.progress.status ?? (captureReady ? "completed" : "pending")}
+            </span>
+          </div>
+          {topProgress ? (
+            <div className="mt-5">
+              <JobProgressCard progress={topProgress.progress} title={topProgress.title} unknownEtaMessage={topProgress.eta} />
+            </div>
+          ) : captureReady ? (
+            <div className="mt-5 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-emerald-100">Completed · 100%</p>
+                  <p className="mt-1 text-sm text-emerald-50/85">Capture is ready for RealityScan job preparation.</p>
+                </div>
+                <p className="text-sm text-emerald-50/80">{summary?.imageCount ?? status?.extractedFrameCount ?? project?.mediaCount ?? 0} image(s)</p>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4 text-sm text-slate-300">
+              Upload and process media to prepare a RealityScan-ready image set.
+            </div>
+          )}
+        </div>
+
+        <div className="glass-panel mt-6 rounded-lg p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-white">Ready for RealityScan model generation</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">
+                Your capture is prepared. Prepare a RealityScan job to copy the images into a RealityScan-ready input folder, then export OBJ + MTL + textures as a ZIP and import it through Model Artifacts.
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Link href={topPrimaryAction.href} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">
@@ -288,6 +358,14 @@ export default function ProcessingPage() {
               <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
                 Model Artifacts
               </Link>
+              <Link href={`/projects/${params.id}/report`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+                View Report
+              </Link>
+              {viewerAction && (
+                <Link href={viewerAction.href} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
+                  {viewerAction.label}
+                </Link>
+              )}
             </div>
           </div>
           <div className="mt-5 grid gap-3 md:grid-cols-4">
@@ -298,7 +376,7 @@ export default function ProcessingPage() {
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Sparse validation</p>
               <p className="mt-1 text-sm font-semibold text-white">
-                {sparseComplete ? `${(reconstruction?.sparseQualityLabel ?? "Complete").replace(" Sparse Reconstruction", "")}, ${reconstruction?.registeredImageCount ?? 0}/${reconstruction?.selectedFrameCount ?? reconstruction?.inputFrameCount ?? 0}, ${(reconstruction?.sparsePointCount ?? 0).toLocaleString()} points` : "Not run yet."}
+                {sparseValidationLabel}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
@@ -310,7 +388,7 @@ export default function ProcessingPage() {
               <p className="mt-1 text-sm font-semibold text-white">{currentModel && referenceModel ? "Current/reference pair ready" : "Current/reference pair missing"}</p>
             </div>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="hidden">
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-sm font-semibold text-white">Optional Sparse Validation</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
@@ -333,7 +411,7 @@ export default function ProcessingPage() {
           </div>
         </div>
 
-        <div className="glass-panel mt-8 rounded-lg p-6">
+        <div className="hidden">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm text-slate-400">Current step</p>
@@ -391,7 +469,7 @@ export default function ProcessingPage() {
           </div>
         </div>
 
-        <section className="glass-panel mt-6 rounded-lg p-6">
+        <section className="hidden">
           <h2 className="text-lg font-semibold text-white">Capture Summary</h2>
           <p className="mt-2 text-sm text-slate-400">Actual uploaded media and extracted frames prepared for the reconstruction pipeline.</p>
           <div className="mt-4 grid gap-4 md:grid-cols-5">
@@ -452,8 +530,8 @@ export default function ProcessingPage() {
           )}
         </section>
 
-        <section className="glass-panel mt-6 rounded-lg p-6">
-          <h2 className="text-lg font-semibold text-white">Capture Mode Guidance</h2>
+        <details id="capture-review" className="glass-panel mt-6 rounded-lg p-6">
+          <summary className="cursor-pointer text-lg font-semibold text-white">Capture Mode Guidance</summary>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
               <p className="text-sm font-semibold text-white">Video scan mode</p>
@@ -472,7 +550,7 @@ export default function ProcessingPage() {
               </ul>
             </div>
           </div>
-        </section>
+        </details>
 
         <section className="glass-panel mt-6 rounded-lg p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -493,6 +571,15 @@ export default function ProcessingPage() {
               {reconstructing ? "Running..." : "Run Optional Sparse Validation"}
             </button>
           </div>
+          <p className="mt-3 text-sm text-slate-400">Optional. Uses COLMAP to check overlap, camera alignment, and capture viability. Not required for RealityScan.</p>
+          {(sparseProgress?.status === "running" || sweepProgress?.status === "running") && (
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {sparseProgress?.status === "running" && <JobProgressCard progress={sparseProgress} title="Sparse validation progress" unknownEtaMessage="ETA unknown while COLMAP is matching or mapping images." />}
+              {sweepProgress?.status === "running" && <JobProgressCard progress={sweepProgress} title="Sparse experiment sweep progress" unknownEtaMessage="ETA unknown until each COLMAP attempt completes." />}
+            </div>
+          )}
+          <details className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced Sparse Settings</summary>
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
             Sparse validation is optional. A sweep runs multiple COLMAP attempts with different frame selection strategies to find the strongest validation result.
             <button
@@ -797,9 +884,11 @@ export default function ProcessingPage() {
               ))}
             </div>
           )}
+          </details>
         </section>
 
-        <section className="glass-panel mt-6 rounded-lg p-6">
+        <details className="glass-panel mt-6 rounded-lg p-6">
+          <summary className="cursor-pointer text-lg font-semibold text-white">Advanced / Legacy Reconstruction Diagnostics</summary>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -810,7 +899,7 @@ export default function ProcessingPage() {
                 Dense COLMAP is retained as an advanced diagnostic path. It is not the primary Structura workflow; use RealityScan artifacts for client-quality geometry.
               </p>
             </div>
-            {!denseLikelyUnavailable && !sparseQualityPoor && (
+            {canRunDense && (
               <button
                 disabled={!canRunDense || denseReconstructing}
                 onClick={onRunDenseReconstruction}
@@ -940,12 +1029,12 @@ export default function ProcessingPage() {
               Dense point cloud complete. Mesh generation and GLB export are the next milestone.
             </div>
           )}
-        </section>
+        </details>
 
-        <section className="glass-panel mt-6 rounded-lg p-6">
+        <details className="glass-panel mt-6 rounded-lg p-6">
+          <summary className="cursor-pointer text-lg font-semibold text-white">Capture Review</summary>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-white">Capture Review</h2>
               <p className="mt-1 text-sm text-slate-400">Preview thumbnails from the uploaded capture. Reconstruction uses the full extracted frames.</p>
             </div>
             <span className="text-sm text-slate-400">{frames.length} frame(s)</span>
@@ -988,7 +1077,7 @@ export default function ProcessingPage() {
             </details>
             </>
           )}
-        </section>
+        </details>
         {largeFrame && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6" onClick={() => setLargeFrame(null)}>
             <div className="max-h-full max-w-5xl overflow-hidden rounded-lg border border-white/10 bg-slate-950" onClick={(event) => event.stopPropagation()}>
