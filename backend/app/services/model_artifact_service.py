@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 from pathlib import PurePosixPath
 from uuid import uuid4
@@ -15,6 +16,8 @@ ARTIFACT_TYPES = {"dense_point_cloud", "textured_mesh", "mesh", "gaussian_splat"
 SOURCE_TOOLS = {"realitycapture", "realityscan", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
 ROLES = {"current_state", "finished_reference", "baseline", "comparison_result"}
 JOB_KEY = "model_artifact_import"
+DEFAULT_MAX_GLB_MB = 250
+DEFAULT_MAX_FACES_FOR_VIEWER = 500_000
 
 
 class ModelArtifactError(Exception):
@@ -281,6 +284,26 @@ def _is_gaussian_splat(artifact: dict) -> bool:
         return detected
     return False
 
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _viewer_ready_for_browser(artifact: dict) -> bool:
+    if artifact.get("artifactRole") != "viewer_ready":
+        return False
+    model_format = (artifact.get("format") or Path((artifact.get("bundle") or {}).get("mainGlbPath") or artifact["storagePath"]).suffix.lstrip(".")).lower()
+    if model_format not in {"glb", "gltf"} or artifact.get("status") != "ready":
+        return False
+    max_bytes = _int_env("STRUCTURA_PREVIEW_MAX_GLB_MB", DEFAULT_MAX_GLB_MB) * 1024 * 1024
+    max_faces = _int_env("STRUCTURA_PREVIEW_MAX_FACES_FOR_VIEWER", DEFAULT_MAX_FACES_FOR_VIEWER)
+    face_count = (artifact.get("stats") or {}).get("faceCount")
+    return artifact.get("fileSize", 0) <= max_bytes and isinstance(face_count, int | float) and face_count <= max_faces
+
+
 def comparison_candidate(artifact: dict) -> dict:
     model_path = Path((artifact.get("bundle") or {}).get("mainObjPath") or artifact["storagePath"])
     preview = _is_gaussian_splat(artifact)
@@ -324,10 +347,11 @@ def summary(project_id: str) -> dict:
     latest = lambda collection, predicate: next((item for item in collection if predicate(item)), None)
     ready_artifacts = [item for item in measurement_artifacts if item.get("status") == "ready"]
     realityscan_artifacts = [item for item in ready_artifacts if item.get("source_type") == "realityscan"]
+    raw_realityscan_artifacts = [item for item in realityscan_artifacts if item.get("artifactRole") == "raw_realityscan"]
     renderable = lambda item: (item.get("format") or Path((item.get("bundle") or {}).get("mainObjPath") or item["storagePath"]).suffix.lstrip(".").lower()) in {"obj", "glb", "gltf"}
-    preferred = next((item for item in ready_artifacts if item.get("artifactRole") == "viewer_ready" and renderable(item)), None)
+    preferred = next((item for item in ready_artifacts if _viewer_ready_for_browser(item)), None)
     preferred = preferred or next((item for item in ready_artifacts if item.get("artifactRole") == "cleaned_mesh" and renderable(item)), None)
-    preferred = preferred or next((item for item in realityscan_artifacts if renderable(item)), None)
+    preferred = preferred or next((item for item in raw_realityscan_artifacts if renderable(item)), None)
     reference = latest(measurement_artifacts, lambda item: item["role"] == "finished_reference")
     current = latest(measurement_artifacts, lambda item: item["role"] == "current_state")
     comparisons = model_artifact_repository.list_comparisons(project_id)

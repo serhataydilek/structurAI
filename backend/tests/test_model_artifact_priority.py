@@ -9,9 +9,11 @@ from app import main
 from app.services import model_artifact_service, model_postprocessing_service
 
 
-def artifact(role: str, *, format: str = "obj", source: str = "realityscan"):
+def artifact(role: str, *, format: str | None = None, source: str = "realityscan", file_size: int = 1024, face_count: int = 1000):
+    model_format = format or ("glb" if role == "viewer_ready" else "obj")
     return {"artifactId": role, "artifactType": "textured_mesh", "sourceTool": source, "source_type": source, "role": None,
-            "status": "ready", "artifactRole": role, "format": format, "storagePath": "missing.obj", "bundle": {}}
+            "status": "ready", "artifactRole": role, "format": model_format, "storagePath": f"missing.{model_format}", "bundle": {},
+            "fileSize": file_size, "stats": {"faceCount": face_count}}
 
 
 class ModelArtifactPriorityTests(unittest.TestCase):
@@ -21,6 +23,22 @@ class ModelArtifactPriorityTests(unittest.TestCase):
              patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \
              patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
             self.assertEqual(model_artifact_service.summary("project")["preferredModelArtifact"]["artifactRole"], "viewer_ready")
+
+    def test_summary_uses_first_latest_viewer_ready_artifact(self):
+        older = artifact("viewer_ready"); older["artifactId"] = "older"
+        latest = artifact("viewer_ready"); latest["artifactId"] = "latest"
+        with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[latest, older, artifact("raw_realityscan")]), \
+             patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \
+             patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
+            self.assertEqual(model_artifact_service.summary("project")["preferredModelArtifact"]["artifactId"], "latest")
+
+    def test_summary_skips_oversized_viewer_ready_artifact(self):
+        oversized = artifact("viewer_ready", file_size=300 * 1024 * 1024, face_count=1000)
+        raw = artifact("raw_realityscan")
+        with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[oversized, raw]), \
+             patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \
+             patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
+            self.assertEqual(model_artifact_service.summary("project")["preferredModelArtifact"]["artifactRole"], "raw_realityscan")
 
     def test_no_preferred_artifact_when_no_renderable_artifact_exists(self):
         with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[artifact("raw_realityscan", format="ply")]), \

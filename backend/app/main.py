@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
 from app.repositories import annotation_repository, capture_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
-from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
+from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -136,6 +136,10 @@ def diagnostics() -> dict:
 @app.get("/photogrammetry/realityscan/diagnostics")
 def realityscan_diagnostics() -> dict:
     return realityscan_service.diagnostics()
+
+@app.get("/model-preview/diagnostics")
+def model_preview_diagnostics() -> dict:
+    return model_preview_service.diagnostics()
 
 @app.post("/projects/{project_id}/photogrammetry/realityscan/prepare")
 def prepare_realityscan_job(project_id: str) -> dict:
@@ -430,6 +434,22 @@ def get_model_artifact(project_id: str, artifact_id: str) -> dict:
     if not artifact:
         raise HTTPException(status_code=404, detail="Model artifact not found")
     return artifact
+
+@app.post("/projects/{project_id}/model-artifacts/{artifact_id}/prepare-preview")
+def prepare_model_preview(project_id: str, artifact_id: str) -> dict:
+    artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model artifact not found")
+    try:
+        return model_preview_service.prepare(project_id, artifact)
+    except model_preview_service.ModelPreviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/projects/{project_id}/model-preview/status")
+def model_preview_status(project_id: str, source_artifact_id: str | None = None) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return model_preview_service.status(project_id, source_artifact_id)
 
 
 @app.post("/projects/{project_id}/model-artifacts/{artifact_id}/role")

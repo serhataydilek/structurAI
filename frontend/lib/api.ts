@@ -1,4 +1,4 @@
-import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, ModelPreviewDiagnostics, ModelPreviewStatus, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -234,6 +234,9 @@ export function listRealityScanJobs(projectId: string) { return request<Photogra
 export function runRealityScanModel(projectId: string) { return request<RealityScanRunResponse>(`/projects/${projectId}/photogrammetry/realityscan/run`, { method: "POST", body: JSON.stringify({ dry_run: false }) }); }
 export function getRealityScanStatus(projectId: string) { return request<RealityScanStatus | null>(`/projects/${projectId}/photogrammetry/realityscan/status`); }
 export function getLatestModelArtifact(projectId: string) { return request<ModelArtifact>(`/projects/${projectId}/model-artifacts/latest`); }
+export function getModelPreviewDiagnostics() { return request<ModelPreviewDiagnostics>("/model-preview/diagnostics"); }
+export function prepareModelPreview(projectId: string, artifactId: string) { return request<ModelPreviewStatus>(`/projects/${projectId}/model-artifacts/${artifactId}/prepare-preview`, { method: "POST" }); }
+export function getModelPreviewStatus(projectId: string, sourceArtifactId?: string) { return request<ModelPreviewStatus>(`/projects/${projectId}/model-preview/status${sourceArtifactId ? `?source_artifact_id=${encodeURIComponent(sourceArtifactId)}` : ""}`); }
 
 export function saveAttemptViewerTransform(projectId: string, attemptId: string, transform: ViewerTransform, previewMode: PreviewMode) {
   return request(`/projects/${projectId}/attempts/${attemptId}/viewer-transform`, {
