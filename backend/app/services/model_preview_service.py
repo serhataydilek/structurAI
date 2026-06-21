@@ -15,6 +15,10 @@ from app.services import job_progress_service
 JOB_KEY = "model_preview"
 BLENDER_CANDIDATES = tuple(Path(rf"C:\Program Files\Blender Foundation\Blender {version}\blender.exe") for version in ("4.3", "4.2", "4.1"))
 REALITYSCAN_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "projects"
+DEFAULT_TARGET_FACES = 300_000
+DEFAULT_MAX_GLB_MB = 250
+DEFAULT_MAX_FACES_FOR_VIEWER = 500_000
+TOO_LARGE_MESSAGE = "Generated GLB is too large for browser preview. Optimization required."
 
 
 class ModelPreviewError(ValueError):
@@ -31,6 +35,37 @@ def diagnostics() -> dict:
     if not exists: notes.append("Configure BLENDER_EXE or install Blender in a supported location.")
     return {"available": exists, "enabled": enabled, "blender_path": str(candidate) if candidate else None,
             "blender_exists": exists, "notes": notes}
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def preview_limits() -> dict:
+    max_glb_mb = _int_env("STRUCTURA_PREVIEW_MAX_GLB_MB", DEFAULT_MAX_GLB_MB)
+    return {
+        "target_faces": _int_env("STRUCTURA_PREVIEW_TARGET_FACES", DEFAULT_TARGET_FACES),
+        "max_glb_mb": max_glb_mb,
+        "max_glb_bytes": max_glb_mb * 1024 * 1024,
+        "max_viewer_faces": _int_env("STRUCTURA_PREVIEW_MAX_FACES_FOR_VIEWER", DEFAULT_MAX_FACES_FOR_VIEWER),
+    }
+
+
+def viewer_ready_eligibility(path: Path, face_count: int | None, limits: dict | None = None) -> tuple[bool, str | None]:
+    limits = limits or preview_limits()
+    if not path.is_file():
+        return False, "Generated GLB was not found."
+    size = path.stat().st_size
+    if size > limits["max_glb_bytes"]:
+        return False, TOO_LARGE_MESSAGE
+    if face_count is None:
+        return False, "Generated GLB face count is unavailable."
+    if face_count > limits["max_viewer_faces"]:
+        return False, TOO_LARGE_MESSAGE
+    return True, None
 
 
 def _read_report(path: Path) -> dict:
@@ -78,7 +113,8 @@ def _run(project_id: str, source_artifact: dict, source: Path, output: Path, rep
     try:
         job_progress_service.update(project_id, JOB_KEY, stage="launching_blender", label="Launching Blender", progress_percent=15)
         script = Path(__file__).resolve().parents[3] / "scripts" / "convert_obj_to_glb.py"
-        command = [str(blender), "--background", "--python", str(script), "--", str(source), str(output), str(report)]
+        limits = preview_limits()
+        command = [str(blender), "--background", "--python", str(script), "--", str(source), str(output), str(report), json.dumps({"target_faces": limits["target_faces"]})]
         job_progress_service.update(project_id, JOB_KEY, stage="converting_obj_to_glb", label="Converting OBJ to viewer-ready GLB", progress_percent=50)
         result = subprocess.run(command, capture_output=True, text=True, timeout=3600)
         log.write_text((result.stdout or "") + "\n" + (result.stderr or ""), encoding="utf-8")
@@ -86,7 +122,10 @@ def _run(project_id: str, source_artifact: dict, source: Path, output: Path, rep
             raise ModelPreviewError("Blender did not produce a viewer-ready GLB; see preview logs")
         job_progress_service.update(project_id, JOB_KEY, stage="registering_artifact", label="Registering viewer-ready artifact", progress_percent=90)
         report_data = _read_report(report)
-        face_count = report_data.get("polygon_count")
+        face_count = report_data.get("polygons_after_decimation") or report_data.get("polygon_count")
+        eligible, reason = viewer_ready_eligibility(output, face_count, limits)
+        if not eligible:
+            raise ModelPreviewError(reason or TOO_LARGE_MESSAGE)
         model_artifact_repository.add_artifact(
             project_id, "textured_mesh", "manual", output.name, output.stat().st_size, str(output),
             str(output.relative_to(PROCESSED_DIR)), "Derived viewer-ready GLB from RealityScan raw artifact", source_artifact.get("role"),
@@ -103,7 +142,13 @@ def _run(project_id: str, source_artifact: dict, source: Path, output: Path, rep
 def status(project_id: str, source_artifact_id: str | None = None) -> dict:
     progress = job_progress_service.get(project_id, JOB_KEY)
     artifacts = model_artifact_repository.list_artifacts(project_id)
-    viewer = next((item for item in artifacts if item.get("artifactRole") == "viewer_ready" and (not source_artifact_id or item.get("sourceArtifactId") == source_artifact_id)), None)
+    limits = preview_limits()
+    viewer = next((
+        item for item in artifacts
+        if item.get("artifactRole") == "viewer_ready"
+        and (not source_artifact_id or item.get("sourceArtifactId") == source_artifact_id)
+        and viewer_ready_eligibility(Path(item.get("primary_file_path") or item["storagePath"]), (item.get("stats") or {}).get("faceCount"), limits)[0]
+    ), None)
     job_status = (progress or {}).get("status")
     status_value = job_status if job_status == "running" else ("completed" if viewer else (job_status or "not_started"))
     progress_percent = 100 if status_value == "completed" else (progress or {}).get("progressPercent")

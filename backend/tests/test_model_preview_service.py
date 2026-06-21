@@ -60,10 +60,11 @@ class ModelPreviewSourceTests(unittest.TestCase):
             def run_blender(*args, **kwargs):
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(b"glb")
-                report.write_text('{"polygon_count": 800, "texture_count": 2, "warnings": []}')
+                report.write_text('{"polygons_after_decimation": 800, "texture_count": 2, "warnings": []}')
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             artifact = {"artifactId": "raw", "status": "ready", "storagePath": str(source), "role": "current_state"}
             with patch.object(model_preview_service, "PROCESSED_DIR", root), \
+                 patch.object(model_preview_service, "preview_limits", return_value={"target_faces": 300000, "max_glb_mb": 250, "max_glb_bytes": 250 * 1024 * 1024, "max_viewer_faces": 500000}), \
                  patch.object(model_preview_service.subprocess, "run", side_effect=run_blender) as run, \
                  patch.object(model_preview_service.model_artifact_repository, "add_artifact") as add:
                 model_preview_service._run("project", artifact, source, output, report, log, root / "blender.exe")
@@ -73,7 +74,63 @@ class ModelPreviewSourceTests(unittest.TestCase):
             self.assertEqual(add.call_args.args[10]["mainGlbPath"], str(output))
             command = run.call_args.args[0]
             self.assertIn("--", command)
-            self.assertEqual(command[-3:], [str(source), str(output), str(report)])
+            self.assertEqual(command[-4:-1], [str(source), str(output), str(report)])
+
+    def test_oversized_glb_does_not_register_viewer_ready_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "raw.obj"; source.write_text("raw")
+            output = root / "project" / "model_preview" / "job" / "preview.glb"
+            report = output.with_name("preview_report.json")
+            log = output.with_name("blender.log")
+            def run_blender(*args, **kwargs):
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(b"too large")
+                report.write_text('{"polygons_after_decimation": 800}')
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            artifact = {"artifactId": "raw", "status": "ready", "storagePath": str(source), "role": "current_state"}
+            with patch.object(model_preview_service, "PROCESSED_DIR", root), \
+                 patch.object(model_preview_service, "preview_limits", return_value={"target_faces": 300000, "max_glb_mb": 0, "max_glb_bytes": 1, "max_viewer_faces": 500000}), \
+                 patch.object(model_preview_service.subprocess, "run", side_effect=run_blender), \
+                 patch.object(model_preview_service.model_artifact_repository, "add_artifact") as add, \
+                 patch.object(model_preview_service.job_progress_service, "fail") as fail:
+                model_preview_service._run("project", artifact, source, output, report, log, root / "blender.exe")
+            add.assert_not_called()
+            fail.assert_called()
+            self.assertIn("too large", fail.call_args.args[2])
+            self.assertEqual(source.read_text(), "raw")
+
+    def test_over_face_limit_does_not_register_viewer_ready_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "raw.obj"; source.write_text("raw")
+            output = root / "project" / "model_preview" / "job" / "preview.glb"
+            report = output.with_name("preview_report.json")
+            log = output.with_name("blender.log")
+            def run_blender(*args, **kwargs):
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(b"glb")
+                report.write_text('{"polygons_after_decimation": 900000}')
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            artifact = {"artifactId": "raw", "status": "ready", "storagePath": str(source), "role": "current_state"}
+            with patch.object(model_preview_service, "PROCESSED_DIR", root), \
+                 patch.object(model_preview_service, "preview_limits", return_value={"target_faces": 300000, "max_glb_mb": 250, "max_glb_bytes": 250 * 1024 * 1024, "max_viewer_faces": 500000}), \
+                 patch.object(model_preview_service.subprocess, "run", side_effect=run_blender), \
+                 patch.object(model_preview_service.model_artifact_repository, "add_artifact") as add, \
+                 patch.object(model_preview_service.job_progress_service, "fail") as fail:
+                model_preview_service._run("project", artifact, source, output, report, log, root / "blender.exe")
+            add.assert_not_called()
+            fail.assert_called()
+            self.assertIn("too large", fail.call_args.args[2])
+            self.assertEqual(source.read_text(), "raw")
+
+    def test_status_exposes_preview_too_large_error(self):
+        progress = {"status": "failed", "currentStage": "registering_artifact", "progressPercent": 90, "startedAt": "2026-06-21T10:00:00+00:00", "updatedAt": "2026-06-21T10:01:00+00:00", "errors": [model_preview_service.TOO_LARGE_MESSAGE]}
+        with patch.object(model_preview_service.job_progress_service, "get", return_value=progress), \
+             patch.object(model_preview_service.model_artifact_repository, "list_artifacts", return_value=[]):
+            status = model_preview_service.status("project", "raw")
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(status["error_message"], model_preview_service.TOO_LARGE_MESSAGE)
 
     def test_registering_derived_preview_uses_new_output_path(self):
         with tempfile.TemporaryDirectory() as directory:

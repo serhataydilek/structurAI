@@ -12,7 +12,7 @@ import type { ModelArtifact } from "@/lib/types";
 
 export const MAX_DIRECT_OBJ_BYTES = 75 * 1024 * 1024;
 export const MAX_DIRECT_TEXTURE_COUNT = 24;
-export const MAX_DIRECT_GLB_BYTES = 200 * 1024 * 1024;
+export const MAX_DIRECT_GLB_BYTES = 250 * 1024 * 1024;
 
 function artifactRelativePath(artifact: ModelArtifact, source: string | null | undefined) {
   if (!source) return null;

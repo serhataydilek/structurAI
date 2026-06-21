@@ -12,6 +12,8 @@ import type { CaptureSummary, ModelArtifact, ModelPreviewDiagnostics, ModelPrevi
 const ACTIVE_STATUSES = new Set(["preparing", "running", "importing"]);
 const MINIMUM_VALIDATED_IMAGES = 20;
 const VIEWER_FORMATS = new Set(["glb", "gltf"]);
+const MAX_VIEWER_GLB_BYTES = 250 * 1024 * 1024;
+const MAX_VIEWER_FACES = 500_000;
 
 function formatDuration(seconds: number | null) {
   if (seconds === null || seconds === undefined) return "--";
@@ -26,6 +28,16 @@ function modelFormat(artifact: ModelArtifact | null | undefined) {
 
 function isRawRealityScanObjBundle(artifact: ModelArtifact) {
   return artifact.source_type === "realityscan" && artifact.status === "ready" && artifact.artifactRole === "raw_realityscan" && modelFormat(artifact) === "obj";
+}
+
+function isViewerReadyArtifact(artifact: ModelArtifact) {
+  const faceCount = artifact.stats?.faceCount;
+  return artifact.artifactRole === "viewer_ready"
+    && artifact.status === "ready"
+    && VIEWER_FORMATS.has(modelFormat(artifact))
+    && artifact.fileSize <= MAX_VIEWER_GLB_BYTES
+    && typeof faceCount === "number"
+    && faceCount <= MAX_VIEWER_FACES;
 }
 
 export default function PhotogrammetryPage() {
@@ -64,8 +76,8 @@ export default function PhotogrammetryPage() {
       ?? readyRealityScanArtifacts.find((item) => modelFormat(item) === "obj")
       ?? null;
     const preferred = artifactSummary?.preferredModelArtifact ?? null;
-    const nextViewerArtifact = artifacts.find((item) => item.artifactRole === "viewer_ready" && item.status === "ready" && VIEWER_FORMATS.has(modelFormat(item)))
-      ?? (preferred?.artifactRole === "viewer_ready" && VIEWER_FORMATS.has(modelFormat(preferred)) ? preferred : null);
+    const nextViewerArtifact = artifacts.find(isViewerReadyArtifact)
+      ?? (preferred && isViewerReadyArtifact(preferred) ? preferred : null);
     const artifactForLatestJob = nextViewerArtifact ?? (nextJob?.status === "completed"
       ? readyRealityScanArtifacts.find((item) => item.job_id === nextJob.job_id) ?? nextRawArtifact
       : nextRawArtifact);
@@ -238,7 +250,7 @@ export default function PhotogrammetryPage() {
             </div>
             {!viewerReadyAvailable && previewUnavailable && <p className="mt-3 text-xs text-amber-100">Preview preparation requires Blender configuration.</p>}
             {previewRunning && <div className="mt-4 max-w-md"><div className="h-2 overflow-hidden rounded-full bg-slate-800"><div className={`h-full bg-brand ${previewPercent == null ? "w-1/3 animate-pulse" : ""}`} style={previewPercent != null ? { width: `${Math.max(5, Math.min(100, previewPercent))}%` } : undefined} /></div><p className="mt-2 text-xs text-slate-400">{previewStatus?.stage ? previewStatus.stage.replaceAll("_", " ") : "Preparing preview"}{previewPercent != null ? ` - ${Math.round(previewPercent)}%` : ""}</p></div>}
-            {previewFailed && <p className="mt-3 text-sm text-red-200">{previewStatus?.error_message ?? "Preview preparation failed."}</p>}
+            {previewFailed && <p className="mt-3 text-sm text-red-200">{previewStatus?.error_message?.includes("too large") ? "Preview needs a smaller optimized model." : previewStatus?.error_message ?? "Preview preparation failed."}</p>}
           </section>
         )}
 

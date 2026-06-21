@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import bpy
 from mathutils import Vector
@@ -34,6 +35,21 @@ def _texture_count(objects: list[bpy.types.Object]) -> int:
                 if image:
                     texture_paths.add(image.filepath or image.name)
     return len(texture_paths)
+
+
+def _int(value: Any, default: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _load_options(raw: str | None) -> dict[str, int]:
+    try:
+        parsed = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        parsed = {}
+    return {"target_faces": _int(parsed.get("target_faces"), 300_000)}
 
 
 def _scene_bounds(objects: list[bpy.types.Object]) -> tuple[Vector, Vector, float]:
@@ -66,9 +82,30 @@ def _center_scene(objects: list[bpy.types.Object]) -> None:
         obj.location -= center
 
 
+def _decimate(objects: list[bpy.types.Object], target_faces: int, warnings: list[str]) -> bool:
+    polygons_before = _polygon_count(objects)
+    if target_faces <= 0 or polygons_before <= target_faces:
+        return False
+    ratio = max(0.001, min(1.0, target_faces / max(polygons_before, 1)))
+    for obj in objects:
+        if obj.type != "MESH" or not obj.data.polygons:
+            continue
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.select_all(action="DESELECT")
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+        modifier = obj.modifiers.new("StructuraViewerDecimate", "DECIMATE")
+        modifier.ratio = ratio
+        modifier.use_collapse_triangulate = True
+        bpy.ops.object.modifier_apply(modifier=modifier.name)
+    warnings.append(f"Decimated mesh from {polygons_before} polygons toward {target_faces} polygons.")
+    return True
+
+
 def main() -> None:
     args = sys.argv[sys.argv.index("--") + 1:]
     source, output, report = map(Path, args[:3])
+    options = _load_options(args[3] if len(args) > 3 else None)
     warnings: list[str] = []
 
     bpy.ops.object.select_all(action="SELECT")
@@ -82,17 +119,26 @@ def main() -> None:
 
     _recalculate_normals(objects)
     _center_scene(objects)
+    decimation_applied = _decimate(objects, options["target_faces"], warnings)
+    objects = _mesh_objects()
+    _recalculate_normals(objects)
     objects = _mesh_objects()
     polygon_count = _polygon_count(objects)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=str(output), export_format="GLB", export_materials="EXPORT", export_apply=True)
+    output_size = output.stat().st_size if output.is_file() else None
     report.write_text(json.dumps({
         "input_obj": str(source),
         "output_glb": str(output),
         "object_count": len(objects),
         "polygon_count": polygon_count,
         "polygon_count_before": polygons_before,
+        "polygons_before": polygons_before,
+        "polygons_after_decimation": polygon_count,
+        "decimation_applied": decimation_applied,
+        "target_faces": options["target_faces"],
+        "output_glb_size_bytes": output_size,
         "texture_count": texture_count,
         "warnings": warnings,
     }, indent=2))
