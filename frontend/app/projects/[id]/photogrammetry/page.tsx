@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Download, ExternalLink, Loader2, Play, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { RealityScanModelViewer } from "@/components/RealityScanModelViewer";
 import { getCaptureSummary, getProcessingStatus, getRealityScanDiagnostics, getRealityScanStatus, listModelArtifacts, modelArtifactDownloadUrl, runRealityScanModel } from "@/lib/api";
 import type { CaptureSummary, ModelArtifact, ProcessingStatus, RealityScanDiagnostics, RealityScanStatus } from "@/lib/types";
 
@@ -42,9 +43,9 @@ export default function PhotogrammetryPage() {
     setCapture(nextCapture);
     setJob(nextJob);
     const readyRealityScanArtifacts = artifactSummary?.artifacts.filter((item) => item.source_type === "realityscan" && item.status === "ready") ?? [];
-    const artifactForLatestJob = nextJob?.status === "completed"
+    const artifactForLatestJob = artifactSummary?.preferredModelArtifact ?? (nextJob?.status === "completed"
       ? readyRealityScanArtifacts.find((item) => item.job_id === nextJob.job_id) ?? null
-      : readyRealityScanArtifacts[0] ?? null;
+      : readyRealityScanArtifacts[0] ?? null);
     setArtifact(artifactForLatestJob);
   };
 
@@ -163,7 +164,7 @@ export default function PhotogrammetryPage() {
         {realityScanCompleted && !hasReadyModelArtifact && <section className="mt-6 border border-amber-300/30 bg-amber-300/10 p-6"><p className="font-semibold text-amber-50">RealityScan completed but no model artifact was found.</p><p className="mt-1 text-sm text-amber-100/80">Check the RealityScan export and Model Artifacts before treating this model as ready.</p></section>}
 
         {hasReadyModelArtifact && (
-          <section className="mt-6 border border-brand/30 bg-panel p-6 shadow-glow"><p className="text-sm text-brand">Primary result</p><h2 className="mt-1 text-2xl font-semibold text-white">3D Model Ready</h2><p className="mt-1 text-sm text-slate-400">RealityScan generated the production model artifact: {artifact?.fileName} {artifact?.bundle?.textureCount ? `with ${artifact.bundle.textureCount} textures` : ""}</p><p className="mt-3 text-xs text-slate-500">Preview support for this artifact is being prepared.</p><div className="mt-5 flex flex-wrap gap-3"><span className="inline-flex items-center gap-2 rounded border border-white/10 px-3 py-2 text-sm text-slate-500"><ExternalLink size={16} />View 3D Model (preview pending)</span><a href={modelArtifactDownloadUrl(id, artifact!.artifactId)} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><Download size={16} />Download OBJ</a><Link href={`/projects/${id}/model-artifacts`} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><ExternalLink size={16} />Open Model Artifact</Link></div></section>
+          <section id="model-viewer" className="mt-6 border border-brand/30 bg-panel p-6 shadow-glow"><p className="text-sm text-brand">Primary result</p><h2 className="mt-1 text-2xl font-semibold text-white">3D Model Ready</h2><p className="mt-1 text-sm text-slate-400">RealityScan generated the production model artifact: {artifact?.fileName} {artifact?.bundle?.textureCount ? `with ${artifact.bundle.textureCount} textures` : ""}</p><div className="mt-5"><RealityScanModelViewer artifact={artifact!} projectId={id} /></div><div className="mt-5 flex flex-wrap gap-3"><a href="#model-viewer" className="inline-flex items-center gap-2 rounded bg-brand px-3 py-2 text-sm font-medium text-ink"><ExternalLink size={16} />View 3D Model</a><a href={modelArtifactDownloadUrl(id, artifact!.artifactId)} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><Download size={16} />Download OBJ</a><Link href={`/projects/${id}/model-artifacts`} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><ExternalLink size={16} />Open Model Artifact</Link></div></section>
         )}
 
         <section className="mt-8 border-t border-white/10 pt-6"><p className="text-sm text-slate-400">Optional Validation &amp; Comparison</p><h2 className="mt-1 text-xl font-semibold text-white">Validate capture or compare model states</h2><p className="mt-2 text-sm text-slate-400">COLMAP is optional validation only. Gaussian/Splatfacto remains an Experimental Visual Preview and is not a production reconstruction or cleanup path.</p><div className="mt-4 flex flex-wrap gap-3"><Link href={`/projects/${id}/processing`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Open Optional Validation</Link><Link href={`/projects/${id}/model-artifacts`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Open Comparison Tools</Link><Link href={`/projects/${id}/visual-preview`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Experimental Visual Preview</Link></div></section>

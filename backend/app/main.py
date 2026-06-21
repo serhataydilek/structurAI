@@ -453,6 +453,25 @@ def download_model_artifact(project_id: str, artifact_id: str) -> FileResponse:
     return FileResponse(path, media_type="application/octet-stream", filename=artifact["fileName"])
 
 
+@app.get("/projects/{project_id}/model-artifacts/{artifact_id}/viewer-files/{file_path:path}")
+def model_artifact_viewer_file(project_id: str, artifact_id: str, file_path: str) -> FileResponse:
+    """Serve only files within this artifact bundle for browser OBJ/MTL loading."""
+    artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model artifact not found")
+    bundle_root = (artifact.get("bundle") or {}).get("bundleRootPath")
+    root = Path(bundle_root) if bundle_root else Path(artifact.get("primary_file_path") or artifact["storagePath"]).parent
+    target = (root / file_path).resolve()
+    realityscan_data_dir = Path(__file__).resolve().parents[2] / "data" / "projects"
+    allowed_roots = (PROCESSED_DIR.resolve(), realityscan_data_dir.resolve())
+    root_resolved = root.resolve()
+    within_bundle = root_resolved in target.parents
+    within_managed_storage = any(allowed_root == root_resolved or allowed_root in root_resolved.parents for allowed_root in allowed_roots)
+    if not file_path or not target.is_file() or not within_bundle or not within_managed_storage:
+        raise HTTPException(status_code=404, detail="Artifact bundle file not found")
+    return FileResponse(target)
+
+
 @app.post("/projects/{project_id}/comparisons")
 def create_comparison(project_id: str, payload: ComparisonCreate) -> dict:
     if not project_repository.get_project(project_id):

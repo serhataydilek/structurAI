@@ -262,7 +262,7 @@ def register_realityscan_export(project_id: str, job_id: str, exported_model_pat
         mtl_file_path=str(mtl_path) if mtl_path else None,
         texture_dir_path=texture_dir_path,
         status="ready",
-        metadata={"textureCount": len(texture_files), "mtlFound": bool(mtl_path)},
+        metadata={"textureCount": len(texture_files), "mtlFound": bool(mtl_path), "artifactRole": "raw_realityscan", "sourceJobId": job_id},
     )
 
 
@@ -322,7 +322,12 @@ def summary(project_id: str) -> dict:
             artifact["importWarning"] = "Gaussian Splat header detected. Preview-only. Not measurement-grade; do not use as finished/current progress comparison input."
     measurement_artifacts = [item for item in artifacts if item["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not _is_gaussian_splat(item)]
     latest = lambda collection, predicate: next((item for item in collection if predicate(item)), None)
-    realityscan_artifacts = [item for item in measurement_artifacts if item.get("source_type") == "realityscan" and item.get("status") == "ready"]
+    ready_artifacts = [item for item in measurement_artifacts if item.get("status") == "ready"]
+    realityscan_artifacts = [item for item in ready_artifacts if item.get("source_type") == "realityscan"]
+    renderable = lambda item: (item.get("format") or Path((item.get("bundle") or {}).get("mainObjPath") or item["storagePath"]).suffix.lstrip(".").lower()) in {"obj", "glb", "gltf"}
+    preferred = next((item for item in ready_artifacts if item.get("artifactRole") == "viewer_ready" and renderable(item)), None)
+    preferred = preferred or next((item for item in ready_artifacts if item.get("artifactRole") == "cleaned_mesh" and renderable(item)), None)
+    preferred = preferred or next((item for item in realityscan_artifacts if renderable(item)), None)
     reference = latest(measurement_artifacts, lambda item: item["role"] == "finished_reference")
     current = latest(measurement_artifacts, lambda item: item["role"] == "current_state")
     comparisons = model_artifact_repository.list_comparisons(project_id)
@@ -344,7 +349,7 @@ def summary(project_id: str) -> dict:
             "latestDensePointCloud": latest(measurement_artifacts, lambda item: item["artifactType"] == "dense_point_cloud"),
             "latestMesh": latest(realityscan_artifacts, lambda item: item["artifactType"] == "textured_mesh") or latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
             "latestCurrentStateModel": current, "comparisonReady": comparison_ready, "comparisonCount": len(measurement_comparisons),
-            "latestComparison": measurement_comparisons[0] if measurement_comparisons else None, "preferredModelArtifact": realityscan_artifacts[0] if realityscan_artifacts else latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "message": message}
+            "latestComparison": measurement_comparisons[0] if measurement_comparisons else None, "preferredModelArtifact": preferred, "message": message}
 
 
 def comparison_detail(project_id: str, comparison: dict) -> dict:

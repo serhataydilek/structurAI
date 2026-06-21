@@ -33,7 +33,11 @@ $env:STRUCTURA_ENABLE_REALITYSCAN = "true"
 
 Create the export-parameters XML in RealityScan rather than hand-writing it: export a model once through the **Export Model** dialog with **Export an info file** enabled, then copy the `<ModelExport>` element from the generated `.rsinfo` file into the XML referenced above. RealityScan rejects guessed or incomplete XML parameter files with `0x80070057` (`ERROR_INVALID_PARAMETER`).
 
-For RealityScan, Metashape, and Pix4D textured exports, upload one ZIP that keeps the OBJ, MTL, and texture images together. High-poly exports can be very large; ZIP import manages the source artifact only and does not add a heavy browser viewer. Create a simplified or medium-resolution derivative later for web presentation.
+For RealityScan, Metashape, and Pix4D textured exports, upload one ZIP that keeps the OBJ, MTL, and texture images together. Structura now renders ready RealityScan OBJ/MTL/texture bundles directly in the production-result viewer. It preserves the raw export and exposes it for download.
+
+### Model post-processing policy
+
+RealityScan output is the factual raw reconstruction. Post-processing is a separate, deterministic derived-artifact stage: a future cleaned mesh or viewer-ready artifact links back to its raw source and must use a new output path. The planned operations are isolated-component removal, largest-component preservation, optional bounds cleanup/repair/decimation, and optional OBJ-to-GLB conversion. AI-generated missing geometry (for example, a guessed roof) must never be presented as factual reconstruction; any future AI completion must be explicitly labelled AI-inferred geometry. COLMAP remains optional validation, while Gaussian/Splatfacto is experimental visual preview only. A real RealityScan executable smoke test is still pending.
 
 ## RealityScan CLI safety spike
 
