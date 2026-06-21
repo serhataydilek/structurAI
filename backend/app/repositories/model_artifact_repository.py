@@ -39,6 +39,8 @@ def _artifact(row) -> dict:
         "format": item.pop("format", None), "primary_file_path": item.pop("primary_file_path", None) or storage_path,
         "mtl_file_path": item.pop("mtl_file_path", None), "texture_dir_path": item.pop("texture_dir_path", None),
         "status": item.pop("status", "ready") or "ready", "metadata": metadata,
+        "artifactRole": item.pop("artifact_role", "raw_realityscan") or "raw_realityscan",
+        "sourceArtifactId": item.pop("source_artifact_id", None), "sourceJobId": item.pop("source_job_id", None),
         "createdAt": created_at, "created_at": created_at, "updatedAt": updated_at,
     }
 
@@ -53,11 +55,12 @@ def add_artifact(project_id: str, artifact_type: str, source_tool: str, file_nam
     primary_file_path = primary_file_path or storage_path
     with get_connection() as conn:
         conn.execute("""INSERT INTO model_artifacts
-            (artifact_id, project_id, artifact_type, source_tool, file_name, file_size, storage_path, relative_path, notes, role, stats_json, bundle_json, source_type, job_id, format, primary_file_path, mtl_file_path, texture_dir_path, status, metadata_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (artifact_id, project_id, artifact_type, source_tool, file_name, file_size, storage_path, relative_path, notes, role, stats_json, bundle_json, source_type, job_id, format, primary_file_path, mtl_file_path, texture_dir_path, status, metadata_json, artifact_role, source_artifact_id, source_job_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (artifact_id, project_id, artifact_type, source_tool, file_name, file_size, storage_path,
              relative_path, notes, role, json.dumps(stats), json.dumps(bundle or {}), source_type, job_id, model_format,
-             primary_file_path, mtl_file_path, texture_dir_path, status, json.dumps(metadata or {}), now, now))
+             primary_file_path, mtl_file_path, texture_dir_path, status, json.dumps(metadata or {}),
+             (metadata or {}).get("artifactRole", "raw_realityscan"), (metadata or {}).get("sourceArtifactId"), (metadata or {}).get("sourceJobId"), now, now))
         row = conn.execute("SELECT * FROM model_artifacts WHERE artifact_id = ?", (artifact_id,)).fetchone()
     return _artifact(row)
 
@@ -77,7 +80,7 @@ def get_artifact(project_id: str, artifact_id: str) -> dict | None:
 def get_latest_ready_artifact(project_id: str) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM model_artifacts WHERE project_id = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 1",
+            "SELECT * FROM model_artifacts WHERE project_id = ? AND status = 'ready' ORDER BY CASE artifact_role WHEN 'viewer_ready' THEN 0 WHEN 'cleaned_mesh' THEN 1 WHEN 'raw_realityscan' THEN 2 ELSE 3 END, created_at DESC LIMIT 1",
             (project_id,),
         ).fetchone()
     return _artifact(row) if row else None

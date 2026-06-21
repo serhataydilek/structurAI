@@ -101,7 +101,7 @@ export type ModelArtifact = {
   artifactId: string; projectId: string; artifactType: "dense_point_cloud" | "textured_mesh" | "mesh" | "gaussian_splat" | "unknown";
   sourceTool: string; fileName: string; fileSize: number; storagePath: string; relativePath: string; notes: string; role?: "current_state" | "finished_reference" | "baseline" | "comparison_result" | null;
   id?: string; project_id?: string; artifact_type?: "textured_mesh" | "mesh" | "point_cloud"; source_type?: "realityscan" | "colmap" | "imported"; job_id?: string | null;
-  format?: "obj" | "glb" | "ply" | "fbx" | null; primary_file_path?: string | null; mtl_file_path?: string | null; texture_dir_path?: string | null; status?: "pending" | "ready" | "failed"; metadata?: Record<string, unknown>;
+  format?: "obj" | "glb" | "ply" | "fbx" | null; primary_file_path?: string | null; mtl_file_path?: string | null; texture_dir_path?: string | null; status?: "pending" | "ready" | "failed"; artifactRole?: "raw_realityscan" | "cleaned_mesh" | "viewer_ready"; sourceArtifactId?: string | null; sourceJobId?: string | null; metadata?: Record<string, unknown>;
   stats: { vertexCount?: number; faceCount?: number | null; hasColor?: boolean; gaussianSplatDetected?: boolean; boundingBox?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null; statsPartial?: boolean };
   importWarning?: string;
   bundle?: { originalZipPath?: string; bundleRootPath?: string; mainObjPath?: string; mtlPath?: string | null; textureFiles?: string[]; textureCount?: number; mtlFound?: boolean };
