@@ -12,6 +12,7 @@ frontend/.env.local
 backend/dev-server.*.log
 frontend/dev-server.*.log
 dev-server.*.log
+.codex-logs/
 data/
 *.db
 *.rsproj

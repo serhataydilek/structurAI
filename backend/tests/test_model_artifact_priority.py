@@ -22,6 +22,14 @@ class ModelArtifactPriorityTests(unittest.TestCase):
              patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
             self.assertEqual(model_artifact_service.summary("project")["preferredModelArtifact"]["artifactRole"], "viewer_ready")
 
+    def test_summary_uses_first_latest_viewer_ready_artifact(self):
+        older = artifact("viewer_ready"); older["artifactId"] = "older"
+        latest = artifact("viewer_ready"); latest["artifactId"] = "latest"
+        with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[latest, older, artifact("raw_realityscan")]), \
+             patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \
+             patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
+            self.assertEqual(model_artifact_service.summary("project")["preferredModelArtifact"]["artifactId"], "latest")
+
     def test_no_preferred_artifact_when_no_renderable_artifact_exists(self):
         with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[artifact("raw_realityscan", format="ply")]), \
              patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \

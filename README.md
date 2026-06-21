@@ -39,6 +39,10 @@ For RealityScan, Metashape, and Pix4D textured exports, upload one ZIP that keep
 
 RealityScan output is the factual raw reconstruction. Post-processing is a separate, deterministic derived-artifact stage: a future cleaned mesh or viewer-ready artifact links back to its raw source and must use a new output path. The planned operations are isolated-component removal, largest-component preservation, optional bounds cleanup/repair/decimation, and optional OBJ-to-GLB conversion. AI-generated missing geometry (for example, a guessed roof) must never be presented as factual reconstruction; any future AI completion must be explicitly labelled AI-inferred geometry. COLMAP remains optional validation, while Gaussian/Splatfacto is experimental visual preview only. A real RealityScan executable smoke test is still pending.
 
+### Viewer-ready previews
+
+Raw RealityScan OBJ/MTL/textures are preserved. Structura can prepare a separate viewer-ready GLB derived artifact through Blender headless conversion, without changing raw geometry or textures. Set `BLENDER_EXE` to Blender's executable and `STRUCTURA_ENABLE_MODEL_PREVIEW=true` to enable it. This is deterministic format conversion, not AI geometry completion; any future AI-inferred geometry must be labelled accordingly.
+
 ## RealityScan CLI safety spike
 
 `scripts/realityscan_cli_spike.py` is an isolated developer spike for preparing a RealityScan command-file job. It is not wired into the production API or main product flow yet.

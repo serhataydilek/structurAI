@@ -185,20 +185,19 @@ export default function ProcessingPage() {
   const realityScanJobExists = realityScanJobs.length > 0;
   const currentModel = artifactSummary?.latestCurrentStateModel;
   const referenceModel = artifactSummary?.latestReferenceModel;
+  const latestModel = artifactSummary?.preferredModelArtifact;
   const rawCaptureProgress = captureProgress ?? status?.jobProgress ?? null;
   const captureProcessingActive = status?.status === "Processing" || rawCaptureProgress?.status === "running";
   const captureReady = !captureProcessingActive && Boolean(summary?.workspacePrepared || status?.workspacePrepared);
   const validatedImageCount = summary?.extractedFrameCount ?? status?.extractedFrameCount ?? 0;
   const hasEnoughValidatedImages = captureReady && validatedImageCount >= 20;
-  const topPrimaryAction = captureProcessingActive || !hasEnoughValidatedImages
+  const topPrimaryAction = latestModel
+    ? { href: `/projects/${params.id}/photogrammetry`, label: "Open RealityScan Preview" }
+    : captureProcessingActive || !hasEnoughValidatedImages
     ? { href: `/projects/${params.id}/photogrammetry`, label: captureProcessingActive ? "Capture processing in progress" : "RealityScan requires 20 images" }
     : !realityScanJobExists
     ? { href: `/projects/${params.id}/photogrammetry`, label: "Generate RealityScan Model" }
-    : !currentModel
-      ? { href: `/projects/${params.id}/model-artifacts`, label: "Import RealityScan ZIP" }
-      : !referenceModel
-        ? { href: `/projects/${params.id}/model-artifacts`, label: "Import Finished Reference Model" }
-        : { href: `/projects/${params.id}/model-artifacts`, label: "Create Comparison Record" };
+    : { href: `/projects/${params.id}/photogrammetry`, label: "Generate RealityScan Model" };
   const denseReadiness = reconstruction?.denseReadiness;
   const attempts = reconstruction?.reconstructionAttempts ?? [];
   const hasSparseAttempt = attempts.length > 0;
@@ -226,23 +225,6 @@ export default function ProcessingPage() {
   ];
   const videoModeRecommendations = ["60-90 seconds", "Balanced 2 FPS", "Video Sequential matching", "Balanced subset"];
   const photoModeRecommendations = ["40-80 images", "Photo Exhaustive matching", "All frames or Balanced subset"];
-  const viewerAction = sparseComplete
-    ? { href: `/projects/${params.id}/viewer`, label: "Open Capture Validation Viewer" }
-    : captureReady
-      ? { href: "#capture-review", label: "Open Capture Review" }
-      : null;
-  const normalizedCaptureProgress =
-    captureReady && rawCaptureProgress?.status === "running"
-      ? {
-          ...rawCaptureProgress,
-          status: "completed" as JobProgress["status"],
-          currentStage: "capture_complete",
-          currentStepLabel: "Capture processing complete",
-          progressPercent: 100,
-          etaSeconds: null,
-          finishedAt: rawCaptureProgress.finishedAt ?? rawCaptureProgress.updatedAt
-        }
-      : rawCaptureProgress;
   const sparseValidationLabel = sparseComplete
     ? `${(reconstruction?.sparseQualityLabel ?? "Complete").replace(" Sparse Reconstruction", "")}, ${reconstruction?.registeredImageCount ?? 0}/${reconstruction?.selectedFrameCount ?? reconstruction?.inputFrameCount ?? 0}, ${(reconstruction?.sparsePointCount ?? 0).toLocaleString()} points`
     : reconstruction?.sparseStatus === "Sparse Reconstruction Failed"
@@ -251,8 +233,6 @@ export default function ProcessingPage() {
   const topProgress =
     captureProcessingActive
       ? { progress: rawCaptureProgress!, title: "Capture processing progress", eta: undefined }
-      : sparseProgress?.status === "running"
-      ? { progress: sparseProgress, title: "Sparse validation progress", eta: "ETA unknown while COLMAP is matching or mapping images." }
       : realityScanProgress?.status === "running"
         ? { progress: realityScanProgress, title: "RealityScan job preparation progress", eta: undefined }
         : null;
@@ -320,16 +300,26 @@ export default function ProcessingPage() {
             <div>
               <p className="text-sm text-slate-400">Status</p>
               <h2 className="mt-1 text-xl font-semibold text-white">
-                {topProgress ? topProgress.title : captureReady ? "Capture processing complete" : "Capture processing not run yet"}
+                {topProgress ? topProgress.title : latestModel ? "RealityScan model ready" : captureReady ? "Capture processing complete" : "Capture processing not run yet"}
               </h2>
             </div>
             <span className="rounded-md border border-white/10 bg-white/[0.03] px-3 py-1 text-sm text-slate-200">
-              {topProgress?.progress.status ?? (captureReady ? "completed" : "pending")}
+              {topProgress?.progress.status ?? (latestModel ? "model ready" : captureReady ? "completed" : "pending")}
             </span>
           </div>
           {topProgress ? (
             <div className="mt-5">
               <JobProgressCard progress={topProgress.progress} title={topProgress.title} unknownEtaMessage={topProgress.eta} />
+            </div>
+          ) : latestModel ? (
+            <div className="mt-5 rounded-lg border border-brand/30 bg-brand/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-cyan-100">Model artifact available</p>
+                  <p className="mt-1 text-sm text-cyan-50/80">Use the RealityScan page to prepare or view the 3D preview.</p>
+                </div>
+                <Link href={`/projects/${params.id}/photogrammetry`} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">Open RealityScan</Link>
+              </div>
             </div>
           ) : captureReady ? (
             <div className="mt-5 rounded-lg border border-emerald-300/20 bg-emerald-300/10 p-4">
@@ -361,16 +351,11 @@ export default function ProcessingPage() {
                 {topPrimaryAction.label}
               </Link>
               <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
-                Model Artifacts
+                Open Artifacts
               </Link>
               <Link href={`/projects/${params.id}/report`} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
                 View Report
               </Link>
-              {viewerAction && (
-                <Link href={viewerAction.href} className="rounded-md border border-white/10 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">
-                  {viewerAction.label}
-                </Link>
-              )}
             </div>
           </div>
           <div className="mt-5 grid gap-3 md:grid-cols-4">
@@ -379,7 +364,7 @@ export default function ProcessingPage() {
               <p className="mt-1 text-sm font-semibold text-white">{captureProcessingActive ? "Processing" : captureReady ? "Ready" : "Not run yet."}</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-xs text-slate-500">COLMAP optional validation</p>
+              <p className="text-xs text-slate-500">Optional validation</p>
               <p className="mt-1 text-sm font-semibold text-white">
                 {sparseValidationLabel}
               </p>
@@ -389,8 +374,8 @@ export default function ProcessingPage() {
               <p className="mt-1 text-sm font-semibold text-white">{captureProcessingActive ? "Waiting for capture processing" : currentModel ? "Current model imported" : "Not imported yet"}</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-xs text-slate-500">Progress readiness</p>
-              <p className="mt-1 text-sm font-semibold text-white">{currentModel && referenceModel ? "Current/reference pair ready" : "Current/reference pair missing"}</p>
+              <p className="text-xs text-slate-500">Latest model</p>
+              <p className="mt-1 text-sm font-semibold text-white">{latestModel ? "Ready to view" : "Not generated yet"}</p>
             </div>
           </div>
           <div className="hidden">
@@ -557,34 +542,31 @@ export default function ProcessingPage() {
           </div>
         </details>
 
-        <section className="glass-panel mt-6 rounded-lg p-6">
+        <section id="optional-validation" className="mt-8 border-t border-white/10 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <Cpu size={18} className="text-brand" />
-                <h2 className="text-lg font-semibold text-white">COLMAP: Optional Validation / Sparse Reconstruction Check</h2>
+                <h2 className="text-lg font-semibold text-white">Optional Validation</h2>
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Optional sparse validation runs COLMAP feature extraction, matching, and mapper to check capture overlap and registration. RealityScan remains the primary model workflow.
+                Use COLMAP only to validate image coverage and alignment. RealityScan remains the production model path.
               </p>
             </div>
             <button
               disabled={!hasFrames || !colmapAvailable || reconstructing || sweeping}
               onClick={onRunSparseReconstruction}
-              className="rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-white/20 px-4 py-2.5 text-sm font-semibold text-slate-100 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {reconstructing ? "Running..." : "Run Optional Sparse Validation"}
+              {reconstructing ? "Running..." : "Run Optional Validation"}
             </button>
           </div>
-          <p className="mt-3 text-sm text-slate-400">Optional. Uses COLMAP to check overlap, camera alignment, and capture viability. Not required for RealityScan.</p>
+          <p className="mt-2 text-sm text-slate-400">COLMAP checks coverage and alignment; it does not generate the production model.</p>
           {(sparseProgress?.status === "running" || sweepProgress?.status === "running") && (
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              {sparseProgress?.status === "running" && <JobProgressCard progress={sparseProgress} title="Sparse validation progress" unknownEtaMessage="ETA unknown while COLMAP is matching or mapping images." />}
-              {sweepProgress?.status === "running" && <JobProgressCard progress={sweepProgress} title="Sparse experiment sweep progress" unknownEtaMessage="ETA unknown until each COLMAP attempt completes." />}
-            </div>
+            <div className="mt-4 max-w-xl">{sparseProgress?.status === "running" && <JobProgressCard progress={sparseProgress} title="Optional validation progress" unknownEtaMessage="ETA unknown while COLMAP is matching or mapping images." />}{sweepProgress?.status === "running" && <JobProgressCard progress={sweepProgress} title="Advanced validation progress" unknownEtaMessage="ETA unknown until each COLMAP attempt completes." />}</div>
           )}
           <details className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] p-4">
-            <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced Sparse Settings</summary>
+            <summary className="cursor-pointer text-sm font-semibold text-slate-200">Advanced validation settings</summary>
           <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-sm text-amber-100">
             Sparse validation is optional. A sweep runs multiple COLMAP attempts with different frame selection strategies to find the strongest validation result.
             <button
