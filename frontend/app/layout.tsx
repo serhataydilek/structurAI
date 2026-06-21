@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Structura AI",
-  description: "Local capture to COLMAP sparse point cloud previews."
+  description: "RealityScan-first model generation with optional COLMAP validation."
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, capture_repository, media_repository, model_artifact_repository, photogrammetry_job_repository, project_repository
+from app.repositories import annotation_repository, capture_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
 from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
@@ -43,6 +43,10 @@ class AnnotationCreate(BaseModel):
 
 class ProcessingOptions(BaseModel):
     extractionFpsMode: str = "Balanced"
+
+
+class RealityScanRunRequest(BaseModel):
+    dry_run: bool = True
 
 
 class SparseReconstructionOptions(BaseModel):
@@ -139,10 +143,26 @@ def prepare_realityscan_job(project_id: str) -> dict:
     try: return realityscan_service.prepare(project_id)
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@app.post("/projects/{project_id}/photogrammetry/realityscan/run")
+def run_realityscan_job(project_id: str, payload: RealityScanRunRequest) -> dict:
+    if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
+    try: return realityscan_service.run(project_id, dry_run=payload.dry_run)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 @app.get("/projects/{project_id}/photogrammetry/realityscan/jobs")
 def list_realityscan_jobs(project_id: str) -> list[dict]:
     if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
-    return photogrammetry_job_repository.list_jobs(project_id)
+    return realityscan_job_repository.list_jobs(project_id)
+
+@app.get("/projects/{project_id}/photogrammetry/realityscan/status")
+def realityscan_job_status(project_id: str) -> dict | None:
+    if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
+    return realityscan_service.latest_status(project_id)
+
+@app.post("/projects/{project_id}/photogrammetry/realityscan/cancel")
+def cancel_realityscan_job(project_id: str) -> dict:
+    if not project_repository.get_project(project_id): raise HTTPException(status_code=404, detail="Project not found")
+    return realityscan_service.cancel_latest_job(project_id)
 
 
 @app.get("/visual-preview/diagnostics", deprecated=True)
@@ -394,6 +414,16 @@ def list_model_artifacts(project_id: str) -> dict:
     return model_artifact_service.summary(project_id)
 
 
+@app.get("/projects/{project_id}/model-artifacts/latest")
+def latest_model_artifact(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    artifact = model_artifact_repository.get_latest_ready_artifact(project_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="No ready model artifact found")
+    return artifact
+
+
 @app.get("/projects/{project_id}/model-artifacts/{artifact_id}")
 def get_model_artifact(project_id: str, artifact_id: str) -> dict:
     artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
@@ -416,7 +446,9 @@ def update_model_artifact_role(project_id: str, artifact_id: str, payload: Artif
 def download_model_artifact(project_id: str, artifact_id: str) -> FileResponse:
     artifact = model_artifact_repository.get_artifact(project_id, artifact_id)
     path = Path(artifact["storagePath"]) if artifact else None
-    if not artifact or not path or not path.is_file() or PROCESSED_DIR.resolve() not in path.resolve().parents:
+    realityscan_data_dir = Path(__file__).resolve().parents[2] / "data" / "projects"
+    allowed_roots = (PROCESSED_DIR.resolve(), realityscan_data_dir.resolve())
+    if not artifact or not path or not path.is_file() or not any(root in path.resolve().parents for root in allowed_roots):
         raise HTTPException(status_code=404, detail="Model artifact not found")
     return FileResponse(path, media_type="application/octet-stream", filename=artifact["fileName"])
 

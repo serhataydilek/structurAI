@@ -27,7 +27,8 @@ export default function ReportPage() {
   const visualPreview = report?.reconstructionMetadata?.visualPreview;
   const visualReadiness = report?.reconstructionMetadata?.visualPreviewReadiness;
   const artifactSummary = report?.modelArtifactSummary;
-  const currentModel = artifactSummary?.latestCurrentStateModel;
+  const productionModel = artifactSummary?.preferredModelArtifact ?? artifactSummary?.latestMesh;
+  const currentModel = artifactSummary?.latestCurrentStateModel ?? productionModel;
   const referenceModel = artifactSummary?.latestReferenceModel;
   const measurementComparisonCount = artifactSummary?.comparisonCount ?? 0;
   const legacyPreviewArtifacts = artifactSummary?.artifacts.filter((item) => item.artifactType === "gaussian_splat" || item.stats.gaussianSplatDetected) ?? [];
@@ -241,7 +242,7 @@ export default function ReportPage() {
               {visualPreview?.splatOutputPath && (
                 <p className="mt-3 break-all text-xs text-emerald-100">Exported output: {visualPreview.splatOutputPath}</p>
               )}
-              <p className="mt-3 text-sm text-amber-100">Visual preview is optimized for viewing, not measurement-grade geometry.</p>
+              <p className="mt-3 text-sm text-amber-100">Experimental visual preview only; not measurement-grade geometry or the production model.</p>
               {(visualReadiness?.reasons ?? []).length > 0 && (
                 <div className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
                   <p className="text-xs font-semibold text-amber-100">Visual preview readiness notes</p>
@@ -271,7 +272,7 @@ export default function ReportPage() {
                 <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Current-state model</p><p className="mt-1 text-sm font-semibold text-white">{currentModel?.fileName ?? "Missing"}</p></div>
                 <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Finished reference model</p><p className="mt-1 text-sm font-semibold text-white">{referenceModel?.fileName ?? "Missing"}</p></div>
                 <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Dense point cloud</p><p className="mt-1 text-sm font-semibold text-white">{artifactSummary?.latestDensePointCloud?.fileName ?? "None"}</p></div>
-                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Mesh / textured mesh</p><p className="mt-1 text-sm font-semibold text-white">{artifactSummary?.latestMesh?.fileName ?? "None"}</p></div>
+                <div className="rounded border border-white/10 bg-slate-950/30 p-3"><p className="text-xs text-slate-500">Production model artifact</p><p className="mt-1 text-sm font-semibold text-white">{productionModel ? `${productionModel.source_type === "realityscan" ? "RealityScan · " : ""}${productionModel.fileName}` : "None"}</p></div>
               </div>
               <p className="mt-4 text-sm text-cyan-50">{readinessMessage}</p>
               <p className="mt-2 text-xs text-cyan-100/70">This is readiness tracking, not a construction progress percentage. No completed or missing zones are inferred.</p>

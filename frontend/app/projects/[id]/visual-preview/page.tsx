@@ -132,10 +132,10 @@ export default function VisualPreviewPage() {
         </div>
 
         <div className="glass-panel mt-5 rounded-lg p-8">
-          <p className="text-sm text-amber-100">Legacy experimental preview</p>
+          <p className="text-sm text-amber-100">Experimental Visual Preview only</p>
           <h1 className="mt-2 text-3xl font-semibold text-white">{project?.name ?? "Legacy preview"}</h1>
           <p className="mt-3 text-sm leading-6 text-slate-400">
-            This Nerfstudio/Gaussian Splat experiment is retained for legacy records only. Use Model Artifacts and external photogrammetry outputs for the active product workflow.
+            Gaussian/Splatfacto is an experimental visual preview only. It is not the main reconstruction workflow or a production model artifact.
           </p>
 
           <section className="mt-8 rounded-lg border border-white/10 bg-white/[0.03] p-5">
@@ -394,7 +394,7 @@ export default function VisualPreviewPage() {
           </section>
 
           <div className="mt-8 rounded-lg border border-white/10 bg-slate-950/60 p-4 text-sm text-slate-300">
-            Visual preview is optimized for viewing, not measurement-grade geometry.
+            Experimental visual preview only; not measurement-grade geometry or the production model.
           </div>
         </div>
       </div>

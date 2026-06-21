@@ -2,20 +2,97 @@
 
 ## v0.4: External photogrammetry model workflow
 
-Structura uses external photogrammetry engines for client-quality geometry. Its active workflow is:
+Structura uses RealityScan as its primary client-quality model-generation path. Its active workflow is:
 
 - Capture and optional sparse reconstruction validation.
-- RealityScan, Metashape, Pix4D, CloudCompare, or a comparable external engine for dense geometry.
+- Generate the production mesh in RealityScan; use COLMAP only as optional capture/alignment validation.
 - OBJ + MTL + texture ZIP or dense PLY import into Model Artifacts.
 - Current/reference roles, measurement readiness, and future comparison.
 
 Recommended immediate workflow: capture photos; validate capture in Structura; create a high-quality model in RealityCapture/Metashape/Pix4D; import it; mark the finished reference and current state; create a comparison record; then generate the report. Alignment and point-cloud distance analysis remain external (for example CloudCompare) until the internal comparison engine is implemented.
 
-RealityScan automation is currently a foundation: Structura diagnoses `REALITYSCAN_EXE`, prepares a project job folder, and provides a manual workflow bridge. Full headless automation depends on verified local CLI support.
+RealityScan model generation includes a stage-aware status card (alignment, component selection, mesh reconstruction, unwrap, texture, export, and import). Overall progress is persisted monotonically even though RealityScan's native progress file resets its percentage for each internal task. The UI updates elapsed time every second and shows `Estimating...` until an ETA is credible. Gaussian/Splatfacto remains an experimental visual-preview-only path.
 
 v0.4 supports importing artifacts and creating comparison records. Real progress measurement requires externally generated dense point clouds or meshes; Gaussian Splat exports remain preview-only.
 
+### RealityScan backend configuration
+
+The backend diagnostics endpoint is `GET /photogrammetry/realityscan/diagnostics`. It only checks configuration and files; it never starts RealityScan.
+
+- `REALITYSCAN_EXE`: optional full path to `RealityScan.exe`. When unset, Structura checks the standard Epic Games RealityScan installation paths.
+- `REALITYSCAN_EXPORT_PARAMS`: optional full path to a RealityScan OBJ export parameters XML. When unset, Structura checks `config/realityscan_export_obj.xml`.
+- `STRUCTURA_ENABLE_REALITYSCAN=true`: enables the RealityScan integration after its executable and export parameters are available.
+
+Example PowerShell configuration:
+
+```powershell
+$env:REALITYSCAN_EXE = "C:\Program Files\Epic Games\RealityScan\RealityScan.exe"
+$env:REALITYSCAN_EXPORT_PARAMS = "C:\path\to\realityscan_export_obj.xml"
+$env:STRUCTURA_ENABLE_REALITYSCAN = "true"
+```
+
+Create the export-parameters XML in RealityScan rather than hand-writing it: export a model once through the **Export Model** dialog with **Export an info file** enabled, then copy the `<ModelExport>` element from the generated `.rsinfo` file into the XML referenced above. RealityScan rejects guessed or incomplete XML parameter files with `0x80070057` (`ERROR_INVALID_PARAMETER`).
+
 For RealityScan, Metashape, and Pix4D textured exports, upload one ZIP that keeps the OBJ, MTL, and texture images together. High-poly exports can be very large; ZIP import manages the source artifact only and does not add a heavy browser viewer. Create a simplified or medium-resolution derivative later for web presentation.
+
+## RealityScan CLI safety spike
+
+`scripts/realityscan_cli_spike.py` is an isolated developer spike for preparing a RealityScan command-file job. It is not wired into the production API or main product flow yet.
+
+Set the RealityScan executable explicitly when possible:
+
+```powershell
+$env:REALITYSCAN_EXE="C:\Program Files\Epic Games\RealityScan_2.1\RealityScan.exe"
+```
+
+If `REALITYSCAN_EXE` is not set, the spike checks these Windows install paths:
+
+- `C:\Program Files\Epic Games\RealityScan\RealityScan.exe`
+- `C:\Program Files\Epic Games\RealityScan_2.1\RealityScan.exe`
+
+Dry-run mode is the default. It creates a temporary job folder, copies source images into `images/`, writes `realityscan_job.rscmd`, writes `export_params.xml`, and prints the exact command without launching RealityScan:
+
+```powershell
+python .\scripts\realityscan_cli_spike.py "C:\path\to\image-folder" --dry-run
+```
+
+To keep the generated files in a known folder:
+
+```powershell
+python .\scripts\realityscan_cli_spike.py "C:\path\to\image-folder" --job-root ".\files\realityscan-cli-spike" --dry-run
+```
+
+Run for real only after reviewing the generated `.rscmd` and confirming this RealityScan version supports `-execRSCMD`, `-stdConsole`, and `-writeProgress`:
+
+```powershell
+python .\scripts\realityscan_cli_spike.py "C:\path\to\image-folder" --job-root ".\files\realityscan-cli-spike" --run
+```
+
+Expected spike folder layout:
+
+- `images/` — copied input images used by `-addFolder`
+- `export/` — expected `model.obj` output location
+- `crash/` — reserved for crash artifacts/manual collection
+- `logs/progress.txt` — expected progress log path passed to RealityScan
+- `project.rsproj` — expected saved RealityScan project
+- `realityscan_job.rscmd` — generated command file
+- `export_params.xml` — minimal OBJ export parameter file
+
+The generated `.rscmd` contains:
+
+```text
+-newScene
+-addFolder <job>\images
+-align
+-selectMaximalComponent
+-setReconstructionRegionAuto
+-calculateNormalModel
+-unwrap
+-calculateTexture
+-save <job>\project.rsproj
+-exportSelectedModel <job>\export\model.obj <job>\export_params.xml
+-quit
+```
 
 ## Viewer-ready model guidance
 

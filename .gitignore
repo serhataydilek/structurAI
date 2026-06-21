@@ -11,4 +11,10 @@ frontend/out/
 frontend/.env.local
 backend/dev-server.*.log
 frontend/dev-server.*.log
+dev-server.*.log
+data/
+*.db
+*.rsproj
+*.tsbuildinfo
+backend/tests/__pycache__/
 files/*

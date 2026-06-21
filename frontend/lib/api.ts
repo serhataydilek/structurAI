@@ -1,4 +1,4 @@
-import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -231,6 +231,9 @@ export function createComparison(projectId: string, referenceArtifactId: string,
 export function getRealityScanDiagnostics() { return request<RealityScanDiagnostics>("/photogrammetry/realityscan/diagnostics"); }
 export function prepareRealityScanJob(projectId: string) { return request<PhotogrammetryJob>(`/projects/${projectId}/photogrammetry/realityscan/prepare`, { method: "POST" }); }
 export function listRealityScanJobs(projectId: string) { return request<PhotogrammetryJob[]>(`/projects/${projectId}/photogrammetry/realityscan/jobs`); }
+export function runRealityScanModel(projectId: string) { return request<RealityScanRunResponse>(`/projects/${projectId}/photogrammetry/realityscan/run`, { method: "POST", body: JSON.stringify({ dry_run: false }) }); }
+export function getRealityScanStatus(projectId: string) { return request<RealityScanStatus | null>(`/projects/${projectId}/photogrammetry/realityscan/status`); }
+export function getLatestModelArtifact(projectId: string) { return request<ModelArtifact>(`/projects/${projectId}/model-artifacts/latest`); }
 
 export function saveAttemptViewerTransform(projectId: string, attemptId: string, transform: ViewerTransform, previewMode: PreviewMode) {
   return request(`/projects/${projectId}/attempts/${attemptId}/viewer-transform`, {

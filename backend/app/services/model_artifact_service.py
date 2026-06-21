@@ -10,6 +10,7 @@ from app.services import job_progress_service
 
 ALLOWED_EXTENSIONS = {".ply", ".obj", ".zip"}
 ZIP_ALLOWED_EXTENSIONS = {".obj", ".mtl", ".jpg", ".jpeg", ".png", ".webp", ".rsinfo"}
+TEXTURE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
 ARTIFACT_TYPES = {"dense_point_cloud", "textured_mesh", "mesh", "gaussian_splat", "unknown"}
 SOURCE_TOOLS = {"realitycapture", "realityscan", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
 ROLES = {"current_state", "finished_reference", "baseline", "comparison_result"}
@@ -211,6 +212,60 @@ def parse_stats(path: Path) -> dict:
         return {}
 
 
+def _related_mtl_path(model_path: Path) -> Path | None:
+    try:
+        for line in model_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.lower().startswith("mtllib "):
+                candidate = model_path.parent / line.split(maxsplit=1)[1].strip()
+                if candidate.is_file():
+                    return candidate
+    except OSError:
+        return None
+    same_name = model_path.with_suffix(".mtl")
+    if same_name.is_file():
+        return same_name
+    return next((path for path in model_path.parent.glob("*.mtl") if path.is_file()), None)
+
+
+def register_realityscan_export(project_id: str, job_id: str, exported_model_path: Path) -> dict:
+    if not exported_model_path.is_file() or exported_model_path.suffix.lower() != ".obj":
+        raise ModelArtifactError("RealityScan OBJ export was not found")
+
+    mtl_path = _related_mtl_path(exported_model_path)
+    texture_files = [path for path in exported_model_path.parent.rglob("*") if path.is_file() and path.suffix.lower() in TEXTURE_EXTENSIONS]
+    texture_dir_path = None
+    if texture_files:
+        texture_dir_path = str(texture_files[0].parent if len({path.parent for path in texture_files}) == 1 else exported_model_path.parent)
+    bundle = {
+        "mainObjPath": str(exported_model_path),
+        "mtlPath": str(mtl_path) if mtl_path else None,
+        "mtlFound": bool(mtl_path),
+        "textureFiles": [str(path) for path in texture_files],
+        "textureCount": len(texture_files),
+    }
+    return model_artifact_repository.add_artifact(
+        project_id,
+        "textured_mesh",
+        "realityscan",
+        exported_model_path.name,
+        exported_model_path.stat().st_size,
+        str(exported_model_path),
+        str(exported_model_path),
+        "RealityScan exported OBJ",
+        "current_state",
+        parse_stats(exported_model_path),
+        bundle,
+        source_type="realityscan",
+        job_id=job_id,
+        model_format="obj",
+        primary_file_path=str(exported_model_path),
+        mtl_file_path=str(mtl_path) if mtl_path else None,
+        texture_dir_path=texture_dir_path,
+        status="ready",
+        metadata={"textureCount": len(texture_files), "mtlFound": bool(mtl_path)},
+    )
+
+
 def _is_gaussian_splat(artifact: dict) -> bool:
     if artifact["artifactType"] == "gaussian_splat":
         return True
@@ -267,6 +322,7 @@ def summary(project_id: str) -> dict:
             artifact["importWarning"] = "Gaussian Splat header detected. Preview-only. Not measurement-grade; do not use as finished/current progress comparison input."
     measurement_artifacts = [item for item in artifacts if item["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not _is_gaussian_splat(item)]
     latest = lambda collection, predicate: next((item for item in collection if predicate(item)), None)
+    realityscan_artifacts = [item for item in measurement_artifacts if item.get("source_type") == "realityscan" and item.get("status") == "ready"]
     reference = latest(measurement_artifacts, lambda item: item["role"] == "finished_reference")
     current = latest(measurement_artifacts, lambda item: item["role"] == "current_state")
     comparisons = model_artifact_repository.list_comparisons(project_id)
@@ -286,9 +342,9 @@ def summary(project_id: str) -> dict:
     return {"artifacts": artifacts, "measurementArtifactCount": len(measurement_artifacts),
             "comparisonCandidates": [comparison_candidate(item) for item in artifacts],
             "latestDensePointCloud": latest(measurement_artifacts, lambda item: item["artifactType"] == "dense_point_cloud"),
-            "latestMesh": latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
+            "latestMesh": latest(realityscan_artifacts, lambda item: item["artifactType"] == "textured_mesh") or latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
             "latestCurrentStateModel": current, "comparisonReady": comparison_ready, "comparisonCount": len(measurement_comparisons),
-            "latestComparison": measurement_comparisons[0] if measurement_comparisons else None, "message": message}
+            "latestComparison": measurement_comparisons[0] if measurement_comparisons else None, "preferredModelArtifact": realityscan_artifacts[0] if realityscan_artifacts else latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "message": message}
 
 
 def comparison_detail(project_id: str, comparison: dict) -> dict:

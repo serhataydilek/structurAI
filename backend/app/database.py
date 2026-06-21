@@ -217,9 +217,47 @@ def init_db() -> None:
                 errors_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS realityscan_jobs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (status IN (
+                    'pending', 'preparing', 'running', 'importing',
+                    'completed', 'failed', 'cancelled'
+                )),
+                progress REAL,
+                eta_seconds REAL,
+                elapsed_seconds REAL,
+                stage TEXT,
+                raw_progress REAL,
+                raw_eta_seconds REAL,
+                raw_elapsed_seconds REAL,
+                raw_alg_id TEXT,
+                updated_at TEXT,
+                image_count INTEGER,
+                job_dir TEXT NOT NULL,
+                images_dir TEXT,
+                export_dir TEXT,
+                progress_file_path TEXT,
+                project_file_path TEXT,
+                exported_model_path TEXT,
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_realityscan_jobs_project_created
+            ON realityscan_jobs (project_id, created_at DESC);
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")
+        _ensure_column(conn, "realityscan_jobs", "raw_progress", "REAL")
+        _ensure_column(conn, "realityscan_jobs", "raw_eta_seconds", "REAL")
+        _ensure_column(conn, "realityscan_jobs", "raw_elapsed_seconds", "REAL")
+        _ensure_column(conn, "realityscan_jobs", "raw_alg_id", "TEXT")
+        _ensure_column(conn, "realityscan_jobs", "updated_at", "TEXT")
         _ensure_column(conn, "capture_metadata", "extraction_fps", "INTEGER NOT NULL DEFAULT 2")
         _ensure_column(conn, "capture_metadata", "average_sharpness", "REAL")
         _ensure_column(conn, "capture_metadata", "blurry_frame_count", "INTEGER NOT NULL DEFAULT 0")
@@ -252,6 +290,14 @@ def init_db() -> None:
         _ensure_column(conn, "visual_preview_outputs", "splat_output_size_bytes", "INTEGER")
         _ensure_column(conn, "visual_preview_outputs", "viewer_asset_path", "TEXT")
         _ensure_column(conn, "model_artifacts", "bundle_json", "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, "model_artifacts", "source_type", "TEXT")
+        _ensure_column(conn, "model_artifacts", "job_id", "TEXT")
+        _ensure_column(conn, "model_artifacts", "format", "TEXT")
+        _ensure_column(conn, "model_artifacts", "primary_file_path", "TEXT")
+        _ensure_column(conn, "model_artifacts", "mtl_file_path", "TEXT")
+        _ensure_column(conn, "model_artifacts", "texture_dir_path", "TEXT")
+        _ensure_column(conn, "model_artifacts", "status", "TEXT NOT NULL DEFAULT 'ready'")
+        _ensure_column(conn, "model_artifacts", "metadata_json", "TEXT")
         _ensure_column(conn, "artifact_comparisons", "analysis_status", "TEXT NOT NULL DEFAULT 'not_started'")
         _ensure_column(conn, "artifact_comparisons", "analysis_summary_json", "TEXT NOT NULL DEFAULT '{}'")
         _ensure_column(conn, "artifact_comparisons", "warnings_json", "TEXT NOT NULL DEFAULT '[]'")

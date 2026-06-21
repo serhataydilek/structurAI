@@ -2,54 +2,115 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Download, ExternalLink, Loader2, Play, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
-import { JobProgressCard } from "@/components/JobProgressCard";
-import { getJobStatus, getRealityScanDiagnostics, listRealityScanJobs, prepareRealityScanJob } from "@/lib/api";
-import type { JobProgress, PhotogrammetryJob, RealityScanDiagnostics } from "@/lib/types";
+import { getCaptureSummary, getProcessingStatus, getRealityScanDiagnostics, getRealityScanStatus, listModelArtifacts, modelArtifactDownloadUrl, runRealityScanModel } from "@/lib/api";
+import type { CaptureSummary, ModelArtifact, ProcessingStatus, RealityScanDiagnostics, RealityScanStatus } from "@/lib/types";
+
+const ACTIVE_STATUSES = new Set(["preparing", "running", "importing"]);
+const MINIMUM_VALIDATED_IMAGES = 20;
+
+function formatDuration(seconds: number | null) {
+  if (seconds === null || seconds === undefined) return "--";
+  const rounded = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(rounded / 60);
+  return minutes ? `${minutes}m ${rounded % 60}s` : `${rounded}s`;
+}
 
 export default function PhotogrammetryPage() {
   const { id } = useParams<{ id: string }>();
-  const [diag, setDiag] = useState<RealityScanDiagnostics | null>(null);
-  const [jobs, setJobs] = useState<PhotogrammetryJob[]>([]);
-  const [progress, setProgress] = useState<JobProgress | null>(null);
-  const [error, setError] = useState("");
+  const [diagnostics, setDiagnostics] = useState<RealityScanDiagnostics | null>(null);
+  const [processing, setProcessing] = useState<ProcessingStatus | null>(null);
+  const [capture, setCapture] = useState<CaptureSummary | null>(null);
+  const [job, setJob] = useState<RealityScanStatus | null>(null);
+  const [artifact, setArtifact] = useState<ModelArtifact | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
-  const load = () => {
-    getRealityScanDiagnostics().then(setDiag).catch((reason) => setError(reason.message));
-    listRealityScanJobs(id).then(setJobs).catch((reason) => setError(reason.message));
-    getJobStatus(id, "realityscan_prepare").then(setProgress).catch(() => undefined);
+  const load = async () => {
+    const [nextDiagnostics, nextProcessing, nextCapture, nextJob, artifactSummary] = await Promise.all([
+      getRealityScanDiagnostics().catch(() => null),
+      getProcessingStatus(id).catch(() => null),
+      getCaptureSummary(id).catch(() => null),
+      getRealityScanStatus(id).catch(() => null),
+      listModelArtifacts(id).catch(() => null),
+    ]);
+    setDiagnostics(nextDiagnostics);
+    setProcessing(nextProcessing);
+    setCapture(nextCapture);
+    setJob(nextJob);
+    const readyRealityScanArtifacts = artifactSummary?.artifacts.filter((item) => item.source_type === "realityscan" && item.status === "ready") ?? [];
+    const artifactForLatestJob = nextJob?.status === "completed"
+      ? readyRealityScanArtifacts.find((item) => item.job_id === nextJob.job_id) ?? null
+      : readyRealityScanArtifacts[0] ?? null;
+    setArtifact(artifactForLatestJob);
   };
 
-  useEffect(load, [id]);
+  useEffect(() => {
+    load().catch(() => setError("Unable to load the photogrammetry workflow"));
+  }, [id]);
+
+  const jobIsActive = Boolean(job && ACTIVE_STATUSES.has(job.status));
+  const captureProcessingActive = processing?.status === "Processing" || processing?.jobProgress?.status === "running";
+  const captureReady = !captureProcessingActive && Boolean(processing?.workspacePrepared && capture?.workspacePrepared);
+  const validatedImageCount = capture?.extractedFrameCount ?? processing?.extractedFrameCount ?? 0;
+  const hasEnoughValidatedImages = captureReady && validatedImageCount >= MINIMUM_VALIDATED_IMAGES;
+  const realityScanRunning = busy || jobIsActive;
+  const realityScanCompleted = job?.status === "completed";
+  const hasReadyModelArtifact = Boolean(artifact);
+  const diagnosticsReady = Boolean(diagnostics?.enabled && diagnostics.executable_exists && diagnostics.export_params_exists);
+  const realityScanCanRun = !captureProcessingActive && captureReady && hasEnoughValidatedImages && diagnosticsReady && !realityScanRunning;
+  const disabledReason = captureProcessingActive
+    ? "Waiting for capture processing to finish."
+    : !captureReady
+      ? "Waiting for validated images."
+      : !hasEnoughValidatedImages
+        ? "At least 20 validated images are required."
+        : !diagnostics?.executable_exists
+          ? "RealityScan executable is not configured."
+          : !diagnosticsReady
+            ? "RealityScan executable is not configured."
+            : realityScanRunning
+              ? "RealityScan is already running."
+              : null;
 
   useEffect(() => {
-    if (!busy) return;
-    let active = true;
-    const poll = () => {
-      getJobStatus(id, "realityscan_prepare").then((item) => {
-        if (active) setProgress(item);
-      }).catch(() => undefined);
-      window.setTimeout(() => {
-        if (active) poll();
-      }, 1200);
-    };
-    poll();
-    return () => {
-      active = false;
-    };
-  }, [busy, id]);
+    if (!captureProcessingActive && !jobIsActive) return;
+    const interval = window.setInterval(() => { load().catch(() => undefined); }, 2000);
+    return () => window.clearInterval(interval);
+  }, [captureProcessingActive, jobIsActive, id]);
 
-  async function prepare() {
+  useEffect(() => {
+    if (!jobIsActive || !job?.started_at) return;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [jobIsActive, job?.started_at]);
+
+  const elapsedSeconds = useMemo(() => {
+    if (job?.started_at && jobIsActive) {
+      const started = Date.parse(job.started_at);
+      if (!Number.isNaN(started)) return Math.max(0, Math.floor((now - started) / 1000));
+    }
+    return job?.elapsed_seconds ?? null;
+  }, [job?.started_at, job?.elapsed_seconds, jobIsActive, now]);
+
+  async function generate() {
+    if (!realityScanCanRun) return;
     setBusy(true);
     setError("");
+    setArtifact(null);
     try {
-      const job = await prepareRealityScanJob(id);
-      setProgress(job.progress ?? null);
-      load();
+      const started = await runRealityScanModel(id);
+      setJob({
+        job_id: started.job_id, status: started.status as RealityScanStatus["status"], stage: "launching_realityscan",
+        stage_key: "launching_realityscan", stage_label: "Launching RealityScan", progress: 0, progress_percent: 0,
+        elapsed_seconds: null, eta_seconds: null, image_count: started.image_count, error_message: null,
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Preparation failed");
+      setError(reason instanceof Error ? reason.message : "RealityScan model generation failed to start");
+      load().catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -58,47 +119,54 @@ export default function PhotogrammetryPage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl">
-        <div className="flex gap-4 text-sm text-slate-300">
-          <Link href={`/projects/${id}/model-artifacts`}>Model Artifacts</Link>
-          <Link href={`/projects/${id}/report`}>Report</Link>
+        <div className="flex flex-wrap gap-4 text-sm text-slate-300">
+          <Link href={`/projects/${id}/processing`} className="hover:text-white">Capture processing</Link>
+          <Link href={`/projects/${id}/model-artifacts`} className="hover:text-white">Model Artifacts</Link>
+          <Link href={`/projects/${id}/report`} className="hover:text-white">Report</Link>
         </div>
-        <div className="glass-panel mt-5 rounded-lg p-7">
-          <p className="text-sm text-brand">External photogrammetry</p>
-          <h1 className="mt-2 text-3xl font-semibold text-white">Prepare RealityScan Job</h1>
-          <p className="mt-3 text-sm text-slate-400">
-            Structura copies the validated image set into a RealityScan-ready job folder and writes a manual workflow draft.
-            RealityScan remains the primary client-quality geometry path.
-          </p>
-          <div className="mt-5 rounded border border-white/10 p-4 text-sm">
-            <p>Executable: {diag?.resolvedRealityScanExe ?? "Not found"}</p>
-            <p className="mt-2">Source: {diag?.source ?? "Checking"} · Headless: {String(diag?.supportsHeadless ?? "unknown")} · Command file: {String(diag?.supportsCommandFile ?? "unknown")}</p>
-            {diag?.errors.map((item) => <p key={item} className="mt-2 text-amber-100">{item}</p>)}
+
+        <section className="mt-5 border border-white/10 bg-panel p-7 shadow-glow">
+          <p className="text-sm text-brand">Upload / Capture Processing</p>
+          <h1 className="mt-2 text-3xl font-semibold text-white">Prepare validated images</h1>
+          <p className="mt-3 text-sm text-slate-400">Media processing extracts frames, validates the image set, and prepares RealityScan input.</p>
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <div><p className="text-xs text-slate-500">Status</p><p className="mt-1 font-semibold text-white">{captureProcessingActive ? "Processing capture" : captureReady ? "Capture ready" : "Awaiting capture"}</p></div>
+            <div><p className="text-xs text-slate-500">Validated images</p><p className="mt-1 font-semibold text-white">{validatedImageCount}</p></div>
+            <div><p className="text-xs text-slate-500">Requirement</p><p className="mt-1 font-semibold text-white">{MINIMUM_VALIDATED_IMAGES}+ images</p></div>
           </div>
-          <button disabled={busy} onClick={prepare} className="mt-5 rounded bg-brand px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50">
-            {busy ? "Running..." : "Prepare RealityScan Job"}
-          </button>
-          {error && <p className="mt-3 text-red-200">{error}</p>}
-          <div className="mt-5">
-            <JobProgressCard progress={progress} title="RealityScan job preparation progress" />
-          </div>
-        </div>
-        <section className="glass-panel mt-6 rounded-lg p-6">
-          <h2 className="font-semibold text-white">Manual RealityScan workflow</h2>
-          <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-slate-300">
-            <li>Open RealityScan and import the prepared job input folder.</li>
-            <li>Align images, build model, and build texture.</li>
-            <li>Export OBJ + MTL + textures as one ZIP.</li>
-            <li>Import the ZIP through Model Artifacts.</li>
-          </ol>
-          {jobs.map((job) => (
-            <div key={job.jobId} className="mt-4 rounded border border-white/10 p-4 text-sm text-slate-300">
-              <p className="font-semibold">{job.status} · {job.imageCount ?? ""} images</p>
-              <p className="mt-2 break-all">Input: {job.inputImageFolder}</p>
-              <p className="break-all">Output: {job.outputFolder}</p>
-              <p className="mt-2 break-all text-xs">Draft command file: {job.commandFilePath}</p>
-            </div>
-          ))}
+          {!captureReady && <Link href={`/projects/${id}/processing`} className="mt-5 inline-flex rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Open Capture Processing</Link>}
         </section>
+
+        <section className="mt-6 border border-white/10 bg-panel p-7">
+          <p className="text-sm text-brand">RealityScan Model Generation</p>
+          <h2 className="mt-2 text-2xl font-semibold text-white">Generate the production model</h2>
+          <p className="mt-3 text-sm text-slate-400">RealityScan is the primary production model path. It starts only after capture processing and image validation are complete.</p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button disabled={!realityScanCanRun} onClick={generate} className="inline-flex items-center gap-2 rounded bg-brand px-4 py-2 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50">
+              {realityScanRunning ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+              {busy ? "Preparing RealityScan..." : realityScanRunning ? "RealityScan is running" : "Generate RealityScan Model"}
+            </button>
+            {disabledReason && <span className="inline-flex items-center gap-2 text-sm text-amber-100"><TriangleAlert size={16} />{disabledReason}</span>}
+          </div>
+          {error && <p className="mt-4 text-sm text-red-200">{error}</p>}
+        </section>
+
+        {(busy || job) && (
+          <section className="mt-6 border border-white/10 bg-panelSoft p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-medium uppercase text-slate-400">RealityScan Model Generation</p><h2 className="mt-1 text-xl font-semibold text-white">{busy && !job ? "Preparing model generation" : job?.stage_label ?? "Waiting for RealityScan"}</h2><p className="mt-1 text-sm text-slate-400">{job?.status === "importing" ? "RealityScan finished, importing model artifact..." : "Overall progress across RealityScan stages"}</p></div><div className="text-right"><p className="text-2xl font-semibold text-brand">{job?.progress_percent ?? 0}%</p><p className="text-xs text-slate-400">Progress</p></div></div>
+            <div className="mt-5 h-2 overflow-hidden bg-slate-800" aria-label="RealityScan progress"><div className={`h-full bg-brand transition-all ${busy && !job ? "animate-pulse" : ""}`} style={{ width: `${job?.progress_percent ?? 0}%` }} /></div>
+            <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 text-sm sm:grid-cols-4"><div><dt className="text-slate-500">Elapsed</dt><dd className="mt-1 text-slate-100">{formatDuration(elapsedSeconds)}</dd></div><div><dt className="text-slate-500">ETA</dt><dd className="mt-1 text-slate-100">{job?.stable_eta_seconds != null ? `~${formatDuration(job.stable_eta_seconds)}` : "Estimating..."}</dd></div><div><dt className="text-slate-500">Images</dt><dd className="mt-1 text-slate-100">{job?.image_count ?? "--"}</dd></div><div><dt className="text-slate-500">Project</dt><dd className="mt-1 truncate text-slate-100">{job?.project_name ?? "Current project"}</dd></div></dl>
+            {job?.error_message && <p className="mt-5 border-l-2 border-red-300 pl-3 text-sm text-red-200">{job.error_message}</p>}
+          </section>
+        )}
+
+        {realityScanCompleted && !hasReadyModelArtifact && <section className="mt-6 border border-amber-300/30 bg-amber-300/10 p-6"><p className="font-semibold text-amber-50">RealityScan completed but no model artifact was found.</p><p className="mt-1 text-sm text-amber-100/80">Check the RealityScan export and Model Artifacts before treating this model as ready.</p></section>}
+
+        {hasReadyModelArtifact && (
+          <section className="mt-6 border border-brand/30 bg-panel p-6 shadow-glow"><p className="text-sm text-brand">Primary result</p><h2 className="mt-1 text-2xl font-semibold text-white">3D Model Ready</h2><p className="mt-1 text-sm text-slate-400">RealityScan generated the production model artifact: {artifact?.fileName} {artifact?.bundle?.textureCount ? `with ${artifact.bundle.textureCount} textures` : ""}</p><p className="mt-3 text-xs text-slate-500">Preview support for this artifact is being prepared.</p><div className="mt-5 flex flex-wrap gap-3"><span className="inline-flex items-center gap-2 rounded border border-white/10 px-3 py-2 text-sm text-slate-500"><ExternalLink size={16} />View 3D Model (preview pending)</span><a href={modelArtifactDownloadUrl(id, artifact!.artifactId)} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><Download size={16} />Download OBJ</a><Link href={`/projects/${id}/model-artifacts`} className="inline-flex items-center gap-2 rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"><ExternalLink size={16} />Open Model Artifact</Link></div></section>
+        )}
+
+        <section className="mt-8 border-t border-white/10 pt-6"><p className="text-sm text-slate-400">Optional Validation &amp; Comparison</p><h2 className="mt-1 text-xl font-semibold text-white">Validate capture or compare model states</h2><p className="mt-2 text-sm text-slate-400">COLMAP is optional validation only. Gaussian/Splatfacto remains an Experimental Visual Preview and is not a production reconstruction or cleanup path.</p><div className="mt-4 flex flex-wrap gap-3"><Link href={`/projects/${id}/processing`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Open Optional Validation</Link><Link href={`/projects/${id}/model-artifacts`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Open Comparison Tools</Link><Link href={`/projects/${id}/visual-preview`} className="rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10">Experimental Visual Preview</Link></div></section>
       </div>
     </AppShell>
   );

@@ -11,8 +11,8 @@ const pipeline = [
   "Phone Photos / Video",
   "Upload Service",
   "Frame Extraction",
-  "Optional Sparse Validation",
-  "RealityScan / External Photogrammetry",
+  "COLMAP Optional Validation / Sparse Reconstruction Check",
+  "RealityScan Primary Client-Quality Model Generation",
   "OBJ + MTL + Texture ZIP",
   "Model Artifacts + Readiness Report"
 ];
@@ -41,7 +41,7 @@ export default function LandingPage() {
             Structura AI
           </h1>
           <p className="mt-5 max-w-2xl text-2xl text-cyan-100">
-            Capture validation and external client-quality building models.
+            RealityScan production models with optional capture validation.
           </p>
           <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">
             Structura AI manages capture quality, external photogrammetry artifacts, and honest progress readiness for inspection, renovation, and construction workflows.
@@ -60,8 +60,8 @@ export default function LandingPage() {
           <div className="rounded-lg border border-white/10 bg-slate-950/70 p-5">
             <div className="mb-5 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-white">External photogrammetry workflow</p>
-                <p className="text-xs text-slate-400">Client-quality geometry through RealityScan and similar tools</p>
+                <p className="text-sm font-medium text-white">RealityScan model generation</p>
+                <p className="text-xs text-slate-400">Primary client-quality production model workflow</p>
               </div>
               <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs text-emerald-200">Ready</span>
             </div>
@@ -107,7 +107,7 @@ export default function LandingPage() {
             ))}
           </div>
           <p className="mt-5 text-sm text-slate-400">
-            Current pipeline: capture validation, optional sparse reconstruction, RealityScan-style model generation, ZIP artifact import, and readiness reporting.
+            RealityScan generates the production model artifact. COLMAP can be used to validate image coverage and alignment quality before or after RealityScan.
           </p>
         </div>
       </section>

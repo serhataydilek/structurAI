@@ -185,8 +185,15 @@ export default function ProcessingPage() {
   const realityScanJobExists = realityScanJobs.length > 0;
   const currentModel = artifactSummary?.latestCurrentStateModel;
   const referenceModel = artifactSummary?.latestReferenceModel;
-  const topPrimaryAction = !realityScanJobExists
-    ? { href: `/projects/${params.id}/photogrammetry`, label: "Prepare RealityScan Job" }
+  const rawCaptureProgress = captureProgress ?? status?.jobProgress ?? null;
+  const captureProcessingActive = status?.status === "Processing" || rawCaptureProgress?.status === "running";
+  const captureReady = !captureProcessingActive && Boolean(summary?.workspacePrepared || status?.workspacePrepared);
+  const validatedImageCount = summary?.extractedFrameCount ?? status?.extractedFrameCount ?? 0;
+  const hasEnoughValidatedImages = captureReady && validatedImageCount >= 20;
+  const topPrimaryAction = captureProcessingActive || !hasEnoughValidatedImages
+    ? { href: `/projects/${params.id}/photogrammetry`, label: captureProcessingActive ? "Capture processing in progress" : "RealityScan requires 20 images" }
+    : !realityScanJobExists
+    ? { href: `/projects/${params.id}/photogrammetry`, label: "Generate RealityScan Model" }
     : !currentModel
       ? { href: `/projects/${params.id}/model-artifacts`, label: "Import RealityScan ZIP" }
       : !referenceModel
@@ -219,8 +226,6 @@ export default function ProcessingPage() {
   ];
   const videoModeRecommendations = ["60-90 seconds", "Balanced 2 FPS", "Video Sequential matching", "Balanced subset"];
   const photoModeRecommendations = ["40-80 images", "Photo Exhaustive matching", "All frames or Balanced subset"];
-  const rawCaptureProgress = captureProgress ?? status?.jobProgress ?? null;
-  const captureReady = Boolean(hasFrames || status?.workspacePrepared || summary?.workspacePrepared);
   const viewerAction = sparseComplete
     ? { href: `/projects/${params.id}/viewer`, label: "Open Capture Validation Viewer" }
     : captureReady
@@ -244,13 +249,13 @@ export default function ProcessingPage() {
       ? "Failed"
       : "Not run yet";
   const topProgress =
-    sparseProgress?.status === "running"
+    captureProcessingActive
+      ? { progress: rawCaptureProgress!, title: "Capture processing progress", eta: undefined }
+      : sparseProgress?.status === "running"
       ? { progress: sparseProgress, title: "Sparse validation progress", eta: "ETA unknown while COLMAP is matching or mapping images." }
       : realityScanProgress?.status === "running"
         ? { progress: realityScanProgress, title: "RealityScan job preparation progress", eta: undefined }
-        : normalizedCaptureProgress?.status === "running"
-          ? { progress: normalizedCaptureProgress, title: "Capture processing progress", eta: undefined }
-          : null;
+        : null;
   async function onRunSparseReconstruction() {
     setReconstructing(true);
     setReconstructionError("");
@@ -346,13 +351,13 @@ export default function ProcessingPage() {
         <div className="glass-panel mt-6 rounded-lg p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-white">Ready for RealityScan model generation</h2>
+              <h2 className="text-lg font-semibold text-white">RealityScan: Primary Client-Quality Model Generation</h2>
               <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-400">
-                Your capture is prepared. Prepare a RealityScan job to copy the images into a RealityScan-ready input folder, then export OBJ + MTL + textures as a ZIP and import it through Model Artifacts.
+                RealityScan generates the production model artifact. COLMAP can be used to validate image coverage and alignment quality before or after RealityScan.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link href={topPrimaryAction.href} className="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-ink hover:bg-cyan-200">
+              <Link href={topPrimaryAction.href} className={`rounded-md px-3 py-2 text-sm font-semibold ${captureProcessingActive || !hasEnoughValidatedImages ? "bg-white/10 text-slate-400" : "bg-brand text-ink hover:bg-cyan-200"}`}>
                 {topPrimaryAction.label}
               </Link>
               <Link href={`/projects/${params.id}/model-artifacts`} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">
@@ -371,17 +376,17 @@ export default function ProcessingPage() {
           <div className="mt-5 grid gap-3 md:grid-cols-4">
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Capture</p>
-              <p className="mt-1 text-sm font-semibold text-white">{hasFrames || status?.workspacePrepared ? "Ready" : "Not run yet."}</p>
+              <p className="mt-1 text-sm font-semibold text-white">{captureProcessingActive ? "Processing" : captureReady ? "Ready" : "Not run yet."}</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-xs text-slate-500">Sparse validation</p>
+              <p className="text-xs text-slate-500">COLMAP optional validation</p>
               <p className="mt-1 text-sm font-semibold text-white">
                 {sparseValidationLabel}
               </p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">RealityScan model</p>
-              <p className="mt-1 text-sm font-semibold text-white">{currentModel ? "Current model imported" : "Not imported yet"}</p>
+              <p className="mt-1 text-sm font-semibold text-white">{captureProcessingActive ? "Waiting for capture processing" : currentModel ? "Current model imported" : "Not imported yet"}</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-xs text-slate-500">Progress readiness</p>
@@ -390,17 +395,17 @@ export default function ProcessingPage() {
           </div>
           <div className="hidden">
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">Optional Sparse Validation</p>
+              <p className="text-sm font-semibold text-white">COLMAP: Optional Validation / Sparse Reconstruction Check</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
               <p className="mt-1 text-sm font-semibold text-slate-100">{reconstruction?.sparseStatus ?? reconstruction?.status ?? "Not Started"}</p>
               <p className="mt-3 text-xs leading-5 text-slate-400">COLMAP sparse points for capture coverage and registration checks only.</p>
               <p className="mt-2 text-xs text-amber-100/85">Validation output, not the final model.</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
-              <p className="text-sm font-semibold text-white">RealityScan model artifact</p>
+              <p className="text-sm font-semibold text-white">RealityScan: Primary Client-Quality Model Generation</p>
               <p className="mt-2 text-xs text-slate-500">Status</p>
-              <p className="mt-1 text-sm font-semibold text-slate-100">Import through Model Artifacts</p>
-              <p className="mt-3 text-xs leading-5 text-slate-400">Prepare a RealityScan job, export OBJ + MTL + textures as ZIP, then import it as the current-state model.</p>
+              <p className="mt-1 text-sm font-semibold text-slate-100">Generate from validated images</p>
+              <p className="mt-3 text-xs leading-5 text-slate-400">A completed RealityScan run creates the production model artifact automatically.</p>
             </div>
             <div className="rounded-md border border-white/10 bg-white/[0.03] p-4">
               <p className="text-sm font-semibold text-white">Progress readiness</p>
@@ -557,7 +562,7 @@ export default function ProcessingPage() {
             <div>
               <div className="flex items-center gap-2">
                 <Cpu size={18} className="text-brand" />
-                <h2 className="text-lg font-semibold text-white">Optional Sparse Validation</h2>
+                <h2 className="text-lg font-semibold text-white">COLMAP: Optional Validation / Sparse Reconstruction Check</h2>
               </div>
               <p className="mt-2 max-w-2xl text-sm text-slate-400">
                 Optional sparse validation runs COLMAP feature extraction, matching, and mapper to check capture overlap and registration. RealityScan remains the primary model workflow.
