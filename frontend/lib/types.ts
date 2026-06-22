@@ -112,6 +112,7 @@ export type FinalModelPreflightStatus = "missing" | "ready" | "warning" | "block
 export type FinalModelFormat = "glb" | "obj" | "unsupported" | null;
 export type FinalModelSource = "uploaded" | "promoted" | "generated" | "unknown";
 export type FinalModelPreflightCheck = { key: string; label: string; status: "pass" | "warning" | "fail"; message: string };
+export type FinalModelPreflightBundle = { mtlFiles: string[]; textureFiles: string[]; hasMtl: boolean; hasTextures: boolean; supportedForPackaging: boolean };
 export type FinalModelPreflightResponse = {
   projectId: string;
   status: FinalModelPreflightStatus;
@@ -120,11 +121,14 @@ export type FinalModelPreflightResponse = {
   warnings: string[];
   blockers: string[];
   packageReady: boolean;
+  bundle: FinalModelPreflightBundle | null;
 };
+export type DeliveryFinalModelQualityBundle = { hasMtl: boolean; hasTextures: boolean; mtlFileCount: number; textureFileCount: number; supportedForPackaging: boolean };
 export type DeliveryFinalModelQuality = Pick<FinalModelPreflightResponse, "status" | "packageReady" | "warnings" | "blockers"> & {
   format: FinalModelFormat;
   sizeBytes: number | null;
   source: FinalModelSource;
+  bundle: DeliveryFinalModelQualityBundle | null;
 };
 export type FinalModelInfo = ModelArtifact & { source?: FinalModelSource };
 export type FinalModelResponse = { ready: boolean; model: FinalModelInfo | null; reason?: string };

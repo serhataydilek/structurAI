@@ -9,6 +9,7 @@ from app.repositories import model_artifact_repository
 
 
 SUPPORTED_FORMATS = {"glb", "obj"}
+TEXTURE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"}
 DEFAULT_LARGE_MODEL_MB = 250
 
 
@@ -34,6 +35,23 @@ def _check(key: str, label: str, status: str, message: str) -> dict:
     return {"key": key, "label": label, "status": status, "message": message}
 
 
+def _obj_bundle(path: Path) -> dict:
+    """List direct OBJ companion files without treating them as package contents."""
+    try:
+        files = [item for item in path.parent.iterdir() if item.is_file()]
+    except OSError:
+        files = []
+    mtl_files = sorted((item.name for item in files if item.suffix.lower() == ".mtl"), key=str.lower)
+    texture_files = sorted((item.name for item in files if item.suffix.lower() in TEXTURE_EXTENSIONS), key=str.lower)
+    return {
+        "mtlFiles": mtl_files,
+        "textureFiles": texture_files,
+        "hasMtl": bool(mtl_files),
+        "hasTextures": bool(texture_files),
+        "supportedForPackaging": False,
+    }
+
+
 def build_preflight(project_id: str) -> dict:
     """Return a stable, non-persistent readiness summary for the final model."""
     artifact = model_artifact_repository.get_latest_by_artifact_role(project_id, "target_model")
@@ -49,6 +67,7 @@ def build_preflight(project_id: str) -> dict:
             "projectId": project_id,
             "status": "missing",
             "finalModel": {"exists": False, "artifactId": None, "filename": None, "format": None, "sizeBytes": None, "source": "unknown"},
+            "bundle": None,
             "checks": checks,
             "warnings": [],
             "blockers": [message],
@@ -61,6 +80,7 @@ def build_preflight(project_id: str) -> dict:
     supported = model_format in SUPPORTED_FORMATS
     size_bytes = artifact.get("fileSize")
     source = _source(artifact)
+    bundle = _obj_bundle(path) if model_format == "obj" else None
     warnings: list[str] = []
     blockers: list[str] = []
     checks = []
@@ -88,8 +108,12 @@ def build_preflight(project_id: str) -> dict:
     else:
         checks.append(_check("file_size", "Final model file size", "pass", "Final model file size is within the configured preflight threshold."))
 
-    if model_format == "obj" and not artifact.get("mtl_file_path") and not artifact.get("texture_dir_path"):
-        message = "OBJ is standalone; MTL and texture bundle files are not included in delivery packaging."
+    if model_format == "obj" and bundle:
+        message = (
+            "OBJ companion files were detected, but MTL/texture bundle packaging is not enabled yet."
+            if bundle["hasMtl"] or bundle["hasTextures"]
+            else "OBJ is standalone; MTL and texture bundle files are not included in delivery packaging."
+        )
         checks.append(_check("obj_bundle_support", "OBJ material and texture bundle support", "warning", message))
         warnings.append(message)
 
@@ -110,6 +134,7 @@ def build_preflight(project_id: str) -> dict:
             "sizeBytes": size_bytes,
             "source": source,
         },
+        "bundle": bundle,
         "checks": checks,
         "warnings": warnings,
         "blockers": blockers,
@@ -120,6 +145,14 @@ def build_preflight(project_id: str) -> dict:
 def compact_summary(preflight: dict) -> dict:
     """Select the delivery-manifest fields from a full preflight response."""
     final_model = preflight["finalModel"]
+    bundle = preflight.get("bundle")
+    compact_bundle = None if bundle is None else {
+        "hasMtl": bundle["hasMtl"],
+        "hasTextures": bundle["hasTextures"],
+        "mtlFileCount": len(bundle["mtlFiles"]),
+        "textureFileCount": len(bundle["textureFiles"]),
+        "supportedForPackaging": bundle["supportedForPackaging"],
+    }
     return {
         "status": preflight["status"],
         "packageReady": preflight["packageReady"],
@@ -128,4 +161,5 @@ def compact_summary(preflight: dict) -> dict:
         "format": final_model["format"],
         "sizeBytes": final_model["sizeBytes"],
         "source": final_model["source"],
+        "bundle": compact_bundle,
     }
