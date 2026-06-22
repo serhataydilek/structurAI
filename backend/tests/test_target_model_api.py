@@ -208,7 +208,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertEqual(preflight["status"], "warning")
         self.assertTrue(preflight["packageReady"])
         self.assertEqual(preflight["finalModel"]["format"], "obj")
-        self.assertEqual(preflight["bundle"], {"mtlFiles": [], "textureFiles": [], "hasMtl": False, "hasTextures": False, "supportedForPackaging": False})
+        self.assertEqual(preflight["bundle"], {"mtlFiles": [], "textureFiles": [], "hasMtl": False, "hasTextures": False, "supportedForPackaging": True})
         self.assertTrue(any("standalone" in warning for warning in preflight["warnings"]))
 
     def test_final_model_preflight_detects_obj_mtl_companion(self):
@@ -218,8 +218,8 @@ class TargetModelApiTests(unittest.TestCase):
         preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
         self.assertTrue(preflight["bundle"]["hasMtl"])
         self.assertEqual(preflight["bundle"]["mtlFiles"], ["final.mtl"])
-        self.assertFalse(preflight["bundle"]["supportedForPackaging"])
-        self.assertTrue(any("detected, but" in warning for warning in preflight["warnings"]))
+        self.assertTrue(preflight["bundle"]["supportedForPackaging"])
+        self.assertEqual(preflight["warnings"], [])
 
     def test_final_model_preflight_detects_obj_texture_companion(self):
         uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
@@ -228,7 +228,8 @@ class TargetModelApiTests(unittest.TestCase):
         preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
         self.assertTrue(preflight["bundle"]["hasTextures"])
         self.assertEqual(preflight["bundle"]["textureFiles"], ["albedo.png"])
-        self.assertTrue(any("detected, but" in warning for warning in preflight["warnings"]))
+        self.assertTrue(preflight["bundle"]["supportedForPackaging"])
+        self.assertEqual(preflight["warnings"], [])
 
     def test_final_model_preflight_blocks_unsupported_format(self):
         root = database.PROCESSED_DIR / self.project_id / "target_models"
@@ -282,7 +283,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertTrue(manifest["finalModelQuality"]["packageReady"])
         self.assertEqual(manifest["finalModelQuality"]["format"], "obj")
         self.assertTrue(manifest["finalModelQuality"]["warnings"])
-        self.assertEqual(manifest["finalModelQuality"]["bundle"], {"hasMtl": False, "hasTextures": False, "mtlFileCount": 0, "textureFileCount": 0, "supportedForPackaging": False})
+        self.assertEqual(manifest["finalModelQuality"]["bundle"], {"hasMtl": False, "hasTextures": False, "mtlFileCount": 0, "textureFileCount": 0, "supportedForPackaging": True})
         self.client.delete(f"/projects/{self.project_id}/target-model")
         self.assertFalse(self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()["ready"])
 
@@ -306,7 +307,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertFalse(bundle["hasTextures"])
         self.assertEqual(bundle["mtlFileCount"], 1)
         self.assertEqual(bundle["textureFileCount"], 0)
-        self.assertFalse(bundle["supportedForPackaging"])
+        self.assertTrue(bundle["supportedForPackaging"])
 
     def test_delivery_manifest_includes_obj_texture_bundle_summary(self):
         uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
@@ -316,6 +317,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertTrue(bundle["hasTextures"])
         self.assertEqual(bundle["mtlFileCount"], 0)
         self.assertEqual(bundle["textureFileCount"], 1)
+        self.assertTrue(bundle["supportedForPackaging"])
 
     def test_delivery_manifest_includes_blocked_unsupported_quality_summary(self):
         root = database.PROCESSED_DIR / self.project_id / "target_models"
@@ -346,6 +348,28 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertIn("generatedAt", metadata)
         self.assertIn("finalModel", metadata)
         self.assertIn("manifest", metadata)
+        self.assertIsNone(metadata["objBundle"])
+
+    def test_obj_delivery_zip_includes_companions_and_bundle_metadata(self):
+        uploaded = self.upload("final.obj", b"mtllib final.mtl\nv 0 0 0\n").json()
+        model_path = Path(uploaded["primary_file_path"])
+        (model_path.parent / "final.mtl").write_text("newmtl material\nmap_Kd albedo.png\n")
+        (model_path.parent / "albedo.png").write_bytes(b"png")
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as package:
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "delivery-metadata.json"})
+            metadata = json.loads(package.read("delivery-metadata.json"))
+        self.assertEqual(metadata["objBundle"], {"included": True, "mtlFiles": ["final.mtl"], "textureFiles": ["albedo.png"], "supportedForPackaging": True})
+
+    def test_standalone_obj_delivery_zip_remains_valid(self):
+        self.upload("final.obj", b"v 0 0 0\n")
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(BytesIO(response.content)) as package:
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "delivery-metadata.json"})
+            metadata = json.loads(package.read("delivery-metadata.json"))
+        self.assertEqual(metadata["objBundle"], {"included": False, "mtlFiles": [], "textureFiles": [], "supportedForPackaging": True})
 
 
 if __name__ == "__main__":

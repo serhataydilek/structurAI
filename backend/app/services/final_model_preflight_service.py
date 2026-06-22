@@ -36,7 +36,7 @@ def _check(key: str, label: str, status: str, message: str) -> dict:
 
 
 def _obj_bundle(path: Path) -> dict:
-    """List direct OBJ companion files without treating them as package contents."""
+    """List direct OBJ companion files eligible for delivery packaging."""
     try:
         files = [item for item in path.parent.iterdir() if item.is_file()]
     except OSError:
@@ -48,7 +48,7 @@ def _obj_bundle(path: Path) -> dict:
         "textureFiles": texture_files,
         "hasMtl": bool(mtl_files),
         "hasTextures": bool(texture_files),
-        "supportedForPackaging": False,
+        "supportedForPackaging": True,
     }
 
 
@@ -110,12 +110,13 @@ def build_preflight(project_id: str) -> dict:
 
     if model_format == "obj" and bundle:
         message = (
-            "OBJ companion files were detected, but MTL/texture bundle packaging is not enabled yet."
-            if bundle["hasMtl"] or bundle["hasTextures"]
-            else "OBJ is standalone; MTL and texture bundle files are not included in delivery packaging."
+            "OBJ is standalone; no MTL or texture companion files were detected."
+            if not bundle["hasMtl"] and not bundle["hasTextures"]
+            else None
         )
-        checks.append(_check("obj_bundle_support", "OBJ material and texture bundle support", "warning", message))
-        warnings.append(message)
+        if message:
+            checks.append(_check("obj_bundle_support", "OBJ material and texture bundle support", "warning", message))
+            warnings.append(message)
 
     package_ready = file_available and supported
     if package_ready:

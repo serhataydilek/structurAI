@@ -468,6 +468,27 @@ def _artifact_file_response(project_id: str, artifact: dict | None) -> dict | No
     }
 
 
+def _safe_obj_companion_files(model_path: Path, bundle: dict | None) -> dict:
+    """Keep delivery ZIP companions to safe, direct files beside the final OBJ."""
+    result = {"mtlFiles": [], "textureFiles": []}
+    if not bundle:
+        return result
+    companion_root = model_path.parent.resolve()
+    archive_names = {"final_model.obj", "delivery-metadata.json"}
+    for key in ("mtlFiles", "textureFiles"):
+        for file_name in bundle.get(key, []):
+            candidate_name = Path(file_name)
+            if candidate_name.is_absolute() or candidate_name.name != file_name:
+                continue
+            candidate = (companion_root / candidate_name).resolve()
+            archive_name = candidate.name
+            if candidate.parent != companion_root or not candidate.is_file() or archive_name.casefold() in archive_names:
+                continue
+            archive_names.add(archive_name.casefold())
+            result[key].append((archive_name, candidate))
+    return result
+
+
 @app.post("/projects/{project_id}/target-model")
 async def upload_target_model(project_id: str, file: UploadFile = File(...)) -> dict:
     if not project_repository.get_project(project_id):
@@ -560,6 +581,14 @@ def download_delivery_package(project_id: str):
     extension = (final.get("format") or path.suffix.lstrip(".")).lower()
     if extension not in {"glb", "obj"}:
         raise HTTPException(status_code=400, detail="Final model format is not supported for delivery packaging")
+    preflight = final_model_preflight_service.build_preflight(project_id)
+    companion_files = _safe_obj_companion_files(path, preflight.get("bundle") if extension == "obj" else None)
+    obj_bundle = None if extension != "obj" else {
+        "included": bool(companion_files["mtlFiles"] or companion_files["textureFiles"]),
+        "mtlFiles": [name for name, _ in companion_files["mtlFiles"]],
+        "textureFiles": [name for name, _ in companion_files["textureFiles"]],
+        "supportedForPackaging": True,
+    }
     metadata = {
         "projectId": project_id,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -567,10 +596,14 @@ def download_delivery_package(project_id: str):
         "finalModel": manifest["metadataPreview"]["finalModel"],
         "manifest": {"ready": manifest["ready"], "missingRequired": manifest["missingRequired"], "items": manifest["metadataPreview"]["items"]},
         "notes": manifest["notes"],
+        "objBundle": obj_bundle,
     }
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
         package.write(path, f"final_model.{extension}")
+        for key in ("mtlFiles", "textureFiles"):
+            for archive_name, companion_path in companion_files[key]:
+                package.write(companion_path, archive_name)
         package.writestr("delivery-metadata.json", json.dumps(metadata, indent=2))
     archive.seek(0)
     return StreamingResponse(archive, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})
