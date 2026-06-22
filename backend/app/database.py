@@ -209,6 +209,17 @@ def init_db() -> None:
                 FOREIGN KEY (current_artifact_id) REFERENCES model_artifacts(artifact_id)
             );
 
+            CREATE TABLE IF NOT EXISTS project_compare_alignments (
+                project_id TEXT PRIMARY KEY,
+                position_x REAL NOT NULL DEFAULT 0,
+                position_y REAL NOT NULL DEFAULT 0,
+                position_z REAL NOT NULL DEFAULT 0,
+                rotation_y_degrees REAL NOT NULL DEFAULT 0,
+                scale REAL NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS photogrammetry_jobs (
                 job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL,
                 input_image_folder TEXT NOT NULL, output_folder TEXT NOT NULL, command_file_path TEXT,

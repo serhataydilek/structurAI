@@ -80,10 +80,33 @@ def get_artifact(project_id: str, artifact_id: str) -> dict | None:
 def get_latest_ready_artifact(project_id: str) -> dict | None:
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT * FROM model_artifacts WHERE project_id = ? AND status = 'ready' ORDER BY CASE artifact_role WHEN 'viewer_ready' THEN 0 WHEN 'cleaned_mesh' THEN 1 WHEN 'raw_realityscan' THEN 2 ELSE 3 END, created_at DESC LIMIT 1",
+            "SELECT * FROM model_artifacts WHERE project_id = ? AND status = 'ready' AND artifact_role != 'target_model' ORDER BY CASE artifact_role WHEN 'viewer_ready' THEN 0 WHEN 'cleaned_mesh' THEN 1 WHEN 'raw_realityscan' THEN 2 ELSE 3 END, created_at DESC LIMIT 1",
             (project_id,),
         ).fetchone()
     return _artifact(row) if row else None
+
+
+def get_latest_by_artifact_role(project_id: str, artifact_role: str) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM model_artifacts WHERE project_id = ? AND artifact_role = ? AND status = 'ready' ORDER BY created_at DESC LIMIT 1",
+            (project_id, artifact_role),
+        ).fetchone()
+    return _artifact(row) if row else None
+
+
+def supersede_ready_artifacts_by_role(project_id: str, artifact_role: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE model_artifacts SET status = 'superseded', updated_at = ? WHERE project_id = ? AND artifact_role = ? AND status = 'ready'",
+            (_now(), project_id, artifact_role),
+        )
+
+
+def delete_artifact(project_id: str, artifact_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.execute("DELETE FROM model_artifacts WHERE project_id = ? AND artifact_id = ?", (project_id, artifact_id))
+    return cursor.rowcount > 0
 
 
 def set_role(project_id: str, artifact_id: str, role: str | None) -> dict | None:

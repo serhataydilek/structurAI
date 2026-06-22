@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PointCloudColorMode, PointCloudPointSize, ViewerScene } from "@/components/ViewerScene";
-import { API_BASE, addAnnotation, getCaptureSummary, getDensePointCloud, getDiagnostics, getFrames, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, getVisualPreviewSummary, getVisualPreviewTrainingStatus, listAnnotations, prepareVisualPreview, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, saveAttemptViewerTransform, trainVisualPreview } from "@/lib/api";
-import type { Annotation, CaptureSummary, Diagnostics, FramePreview, PointCloudResponse, PreviewMode, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt, ViewerTransform, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "@/lib/types";
-import { AlertTriangle, Cpu, FileText, Loader2, Plus } from "lucide-react";
+import { RealityScanModelViewer, type ViewerLayerCenter, type ViewerModelLayer } from "@/components/RealityScanModelViewer";
+import { API_BASE, addAnnotation, deleteTargetModel, getCaptureSummary, getCompareAlignment, getDensePointCloud, getDiagnostics, getFinalModel, getFrames, getLatestModelArtifact, getPointCloud, getProject, getReconstructionSummary, getSceneAnalysis, getTargetModel, getVisualPreviewSummary, getVisualPreviewTrainingStatus, listAnnotations, prepareVisualPreview, promoteTargetModel, resetCompareAlignment, runDenseReconstruction, runSparseReconstruction, runSparseReconstructionSweep, saveAttemptViewerTransform, saveCompareAlignment, trainVisualPreview, uploadTargetModel } from "@/lib/api";
+import type { Annotation, CaptureSummary, CompareAlignment, Diagnostics, FinalModelResponse, FramePreview, ModelArtifact, PointCloudResponse, PreviewMode, Project, ReconstructionSummary, SceneAnalysis, SparseSweepAttempt, ViewerTransform, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "@/lib/types";
+import { AlertTriangle, Cpu, FileText, Loader2, Plus, Upload } from "lucide-react";
 
 const identityViewerTransform: ViewerTransform = {
   rotationX: 0,
@@ -53,6 +54,28 @@ export default function ViewerPage() {
   const [visualPreviewError, setVisualPreviewError] = useState("");
   const [viewerMode, setViewerMode] = useState<"auto" | "dense" | "sparse">("auto");
   const [outputSelection, setOutputSelection] = useState<"sparse" | "visual" | "dense">("sparse");
+  const [modelMode, setModelMode] = useState<"current" | "target" | "compare">("current");
+  const [targetModel, setTargetModel] = useState<ModelArtifact | null>(null);
+  const [currentModelArtifact, setCurrentModelArtifact] = useState<ModelArtifact | null>(null);
+  const [finalModel, setFinalModel] = useState<FinalModelResponse | null>(null);
+  const [targetUploading, setTargetUploading] = useState(false);
+  const [targetDeleting, setTargetDeleting] = useState(false);
+  const [targetPromoting, setTargetPromoting] = useState(false);
+  const [showCompareCurrent, setShowCompareCurrent] = useState(true);
+  const [showCompareTarget, setShowCompareTarget] = useState(true);
+  const [compareCurrentOpacity, setCompareCurrentOpacity] = useState(1);
+  const [compareTargetOpacity, setCompareTargetOpacity] = useState(0.55);
+  const [targetAlignment, setTargetAlignment] = useState({ x: 0, y: 0, z: 0, rotationY: 0, scale: 1 });
+  const [alignmentSaving, setAlignmentSaving] = useState(false);
+  const [alignmentResetting, setAlignmentResetting] = useState(false);
+  const [alignmentFeedback, setAlignmentFeedback] = useState("");
+  const [alignmentError, setAlignmentError] = useState("");
+  const [savedAlignment, setSavedAlignment] = useState<CompareAlignment>({ positionX: 0, positionY: 0, positionZ: 0, rotationYDegrees: 0, scale: 1 });
+  const [layerCenters, setLayerCenters] = useState<Record<string, ViewerLayerCenter>>({});
+  const [compareFitRequest, setCompareFitRequest] = useState(0);
+  const [targetUploadError, setTargetUploadError] = useState("");
+  const [targetDeleteError, setTargetDeleteError] = useState("");
+  const [targetPromoteError, setTargetPromoteError] = useState("");
   const [pointSize, setPointSize] = useState<PointCloudPointSize>("Medium");
   const [pointSizeValue, setPointSizeValue] = useState(0.045);
   const [pointOpacity, setPointOpacity] = useState(1);
@@ -75,6 +98,16 @@ export default function ViewerPage() {
   const [viewerResetKey, setViewerResetKey] = useState(0);
   const [note, setNote] = useState("");
   const [selectedAttemptId, setSelectedAttemptId] = useState<string>("");
+  const currentModelUrl = currentModelArtifact?.fileUrl ?? null;
+  const targetModelUrl = targetModel?.fileUrl ?? null;
+  const compareAvailable = Boolean(currentModelArtifact && targetModel);
+  const alignmentDirty = targetAlignment.x !== savedAlignment.positionX || targetAlignment.y !== savedAlignment.positionY || targetAlignment.z !== savedAlignment.positionZ || targetAlignment.rotationY !== savedAlignment.rotationYDegrees || targetAlignment.scale !== savedAlignment.scale;
+  const savedAlignmentIsDefault = savedAlignment.positionX === 0 && savedAlignment.positionY === 0 && savedAlignment.positionZ === 0 && savedAlignment.rotationYDegrees === 0 && savedAlignment.scale === 1;
+  const alignmentStatus = alignmentError ? "Save failed" : alignmentDirty ? "Unsaved changes" : savedAlignmentIsDefault ? "Defaults" : "Saved";
+  const compareLayers: ViewerModelLayer[] = currentModelArtifact && targetModel ? [
+    { id: currentModelArtifact.artifactId, url: currentModelUrl ?? "", label: "Current Model", role: "current", visible: showCompareCurrent, opacity: compareCurrentOpacity, artifact: currentModelArtifact },
+    { id: targetModel.artifactId, url: targetModelUrl ?? "", label: "Target Model", role: "target", visible: showCompareTarget, opacity: compareTargetOpacity, transform: { position: { x: targetAlignment.x, y: targetAlignment.y, z: targetAlignment.z }, rotation: { y: targetAlignment.rotationY * Math.PI / 180 }, scale: targetAlignment.scale }, artifact: targetModel }
+  ] : [];
 
   useEffect(() => {
     getProject(params.id).then(setProject).catch(() => setProject(null));
@@ -84,8 +117,133 @@ export default function ViewerPage() {
     getDiagnostics().then(setDiagnostics).catch(() => setDiagnostics(null));
     getVisualPreviewSummary(params.id).then(setVisualPreview).catch(() => setVisualPreview(null));
     getVisualPreviewTrainingStatus(params.id).then(setVisualTraining).catch(() => setVisualTraining(null));
+    getTargetModel(params.id).then(setTargetModel).catch(() => setTargetModel(null));
+    getFinalModel(params.id).then(setFinalModel).catch(() => setFinalModel(null));
+    getLatestModelArtifact(params.id).then(setCurrentModelArtifact).catch(() => setCurrentModelArtifact(null));
+    getCompareAlignment(params.id).then(applySavedAlignment).catch(() => undefined);
     refreshReconstruction();
   }, [params.id]);
+
+  useEffect(() => {
+    if (modelMode !== "compare" || compareAvailable) return;
+    setModelMode(currentModelArtifact ? "current" : targetModel ? "target" : "current");
+  }, [compareAvailable, currentModelArtifact, modelMode, targetModel]);
+
+  async function onTargetModelSelected(file?: File) {
+    if (!file) return;
+    if (!/\.(glb|obj)$/i.test(file.name)) {
+      setTargetUploadError("Target Model accepts only .glb or .obj files.");
+      return;
+    }
+    setTargetUploading(true);
+    setTargetUploadError("");
+    try {
+      await uploadTargetModel(params.id, file);
+      setTargetModel(await getTargetModel(params.id));
+      setFinalModel(await getFinalModel(params.id));
+      setModelMode("target");
+    } catch (error) {
+      setTargetUploadError(error instanceof Error ? error.message : "Target model upload failed.");
+    } finally {
+      setTargetUploading(false);
+    }
+  }
+
+  async function onDeleteTargetModel() {
+    setTargetDeleting(true);
+    setTargetDeleteError("");
+    try {
+      await deleteTargetModel(params.id);
+      setTargetModel(await getTargetModel(params.id));
+      setFinalModel(await getFinalModel(params.id));
+      setModelMode("current");
+    } catch (error) {
+      setTargetDeleteError(error instanceof Error ? error.message : "Target model deletion failed.");
+    } finally {
+      setTargetDeleting(false);
+    }
+  }
+
+  async function onPromoteCurrentModel() {
+    if (!currentModelArtifact) return;
+    setTargetPromoting(true);
+    setTargetPromoteError("");
+    try {
+      await promoteTargetModel(params.id, currentModelArtifact.artifactId);
+      setTargetModel(await getTargetModel(params.id));
+      setFinalModel(await getFinalModel(params.id));
+      setModelMode("target");
+    } catch (error) {
+      setTargetPromoteError(error instanceof Error ? error.message : "Current model promotion failed.");
+    } finally {
+      setTargetPromoting(false);
+    }
+  }
+
+  function resetCompareVisualization() {
+    setShowCompareCurrent(true);
+    setShowCompareTarget(true);
+    setCompareCurrentOpacity(1);
+    setCompareTargetOpacity(0.55);
+  }
+
+  function resetTargetAlignment() {
+    setTargetAlignment({ x: 0, y: 0, z: 0, rotationY: 0, scale: 1 });
+    setAlignmentFeedback("Local alignment reset. Saved alignment was not changed.");
+    setAlignmentError("");
+  }
+
+  function applySavedAlignment(alignment: CompareAlignment) {
+    setTargetAlignment({ x: alignment.positionX, y: alignment.positionY, z: alignment.positionZ, rotationY: alignment.rotationYDegrees, scale: alignment.scale });
+    setSavedAlignment({ positionX: alignment.positionX, positionY: alignment.positionY, positionZ: alignment.positionZ, rotationYDegrees: alignment.rotationYDegrees, scale: alignment.scale, updatedAt: alignment.updatedAt });
+  }
+
+  const onLayerCenter = useCallback((id: string, center: ViewerLayerCenter) => {
+    setLayerCenters((current) => ({ ...current, [id]: center }));
+  }, []);
+
+  async function onSaveAlignment() {
+    setAlignmentSaving(true);
+    setAlignmentFeedback("");
+    setAlignmentError("");
+    try {
+      const saved = await saveCompareAlignment(params.id, { positionX: targetAlignment.x, positionY: targetAlignment.y, positionZ: targetAlignment.z, rotationYDegrees: targetAlignment.rotationY, scale: targetAlignment.scale });
+      applySavedAlignment(saved);
+      setAlignmentFeedback("Alignment saved.");
+    } catch (error) {
+      setAlignmentError(error instanceof Error ? error.message : "Alignment could not be saved.");
+    } finally {
+      setAlignmentSaving(false);
+    }
+  }
+
+  async function onResetSavedAlignment() {
+    setAlignmentResetting(true);
+    setAlignmentFeedback("");
+    setAlignmentError("");
+    try {
+      const defaults = await resetCompareAlignment(params.id);
+      applySavedAlignment(defaults);
+      setAlignmentFeedback("Saved alignment reset to defaults.");
+    } catch (error) {
+      setAlignmentError(error instanceof Error ? error.message : "Saved alignment could not be reset.");
+    } finally {
+      setAlignmentResetting(false);
+    }
+  }
+
+  function centerTargetToCurrent() {
+    if (!currentModelArtifact || !targetModel) return;
+    const currentCenter = layerCenters[currentModelArtifact.artifactId];
+    const targetCenter = layerCenters[targetModel.artifactId];
+    if (!currentCenter || !targetCenter) {
+      setAlignmentError("Model bounds are still loading. Try again once both models are visible.");
+      return;
+    }
+    setTargetAlignment((current) => ({ ...current, x: current.x + currentCenter.x - targetCenter.x, y: current.y + currentCenter.y - targetCenter.y, z: current.z + currentCenter.z - targetCenter.z }));
+    setAlignmentError("");
+    setAlignmentFeedback("Target centered to current locally. Save to retain this alignment.");
+  }
 
   useEffect(() => {
     if (visualTraining?.trainingStatus !== "queued" && visualTraining?.trainingStatus !== "running" && visualTraining?.exportStatus !== "running") return;
@@ -494,6 +652,32 @@ export default function ViewerPage() {
                 </button>
               ))}
             </div>
+            <div className="mt-5 border-t border-white/10 pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">Model mode</p>
+                  <p className="mt-1 text-xs text-slate-400">Target Model is stored separately from the current/generated model workflow.</p>
+                </div>
+                <div className="flex rounded-md border border-white/10 p-1">
+                  <button type="button" onClick={() => setModelMode("current")} className={`rounded px-3 py-1.5 text-sm ${modelMode === "current" ? "bg-brand text-ink" : "text-slate-300 hover:bg-white/10"}`}>Current Model</button>
+                  <button type="button" disabled={!targetModel} onClick={() => setModelMode("target")} className={`rounded px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${modelMode === "target" ? "bg-brand text-ink" : "text-slate-300 hover:bg-white/10"}`}>Target Model</button>
+                  <button type="button" disabled={!compareAvailable} onClick={() => setModelMode("compare")} className={`rounded px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${modelMode === "compare" ? "bg-brand text-ink" : "text-slate-300 hover:bg-white/10"}`}>Compare</button>
+                </div>
+              </div>
+              {!compareAvailable && <p className="mt-3 text-xs text-amber-100">{!targetModel && !currentModelArtifact ? "Compare needs a generated/current model and a target model." : !targetModel ? "Compare needs a target model. Upload one or promote the current model." : "Compare needs a generated/current model."}</p>}
+              <div className={`mt-4 rounded-md border p-4 ${finalModel?.ready ? "border-emerald-300/30 bg-emerald-300/5" : "border-white/10 bg-slate-950/40"}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-white">Final Model Delivery</p><p className={`mt-1 text-xs font-medium ${finalModel?.ready ? "text-emerald-200" : "text-amber-100"}`}>{finalModel?.ready ? "Ready" : "Not ready"}</p>{finalModel?.model ? <><p className="mt-2 text-sm text-slate-100">{finalModel.model.filename ?? finalModel.model.fileName}</p><p className="mt-1 text-xs text-slate-400">{(finalModel.model.format ?? "unknown").toUpperCase()} · {((finalModel.model.sizeBytes ?? finalModel.model.fileSize) / 1024 / 1024).toFixed(2)} MB · {finalModel.model.source ?? "unknown"} · {finalModel.model.createdAt ? new Date(finalModel.model.createdAt).toLocaleString() : "unknown date"}</p></> : <p className="mt-2 text-xs text-slate-400">Upload a target model or promote the current model to create a final deliverable.</p>}</div>{finalModel?.ready && finalModel.model?.downloadUrl && <a href={`${API_BASE}${finalModel.model.downloadUrl}`} className="rounded border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Download final model</a>}</div></div>
+              <div className="mt-4 rounded-md border border-white/10 bg-slate-950/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><p className="text-sm font-medium text-white">Target Model upload</p><p className="mt-1 text-xs text-slate-400">Upload a final .glb or .obj model for separate inspection.</p>{targetModel && <div className="mt-2 text-xs text-emerald-200"><p>Loaded: {targetModel.filename ?? targetModel.fileName}</p><p className="mt-1 text-slate-400">{(targetModel.format ?? "unknown").toUpperCase()} · {((targetModel.sizeBytes ?? targetModel.fileSize) / 1024 / 1024).toFixed(2)} MB · Uploaded {targetModel.createdAt ? new Date(targetModel.createdAt).toLocaleString() : "unknown date"}</p></div>}</div>
+                  <div className="flex flex-wrap gap-2"><label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10"><Upload size={16} />{targetUploading ? "Uploading…" : targetModel ? "Replace target" : "Upload target"}<input type="file" accept=".glb,.obj,model/gltf-binary" className="sr-only" disabled={targetUploading || targetDeleting || targetPromoting} onChange={(event) => { void onTargetModelSelected(event.target.files?.[0]); event.currentTarget.value = ""; }} /></label><button type="button" disabled={!currentModelArtifact || targetPromoting || targetUploading || targetDeleting} onClick={() => { void onPromoteCurrentModel(); }} className="rounded-md border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10 disabled:cursor-not-allowed disabled:opacity-50">{targetPromoting ? "Promoting…" : "Promote Current to Target"}</button>{targetModel && <button type="button" disabled={targetDeleting || targetUploading || targetPromoting} onClick={() => { void onDeleteTargetModel(); }} className="rounded-md border border-red-300/40 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-300/10 disabled:cursor-not-allowed disabled:opacity-50">{targetDeleting ? "Deleting…" : "Delete target"}</button>}</div>
+                </div>
+                {targetUploadError && <p className="mt-3 rounded border border-red-300/20 bg-red-300/10 p-2 text-sm text-red-100">{targetUploadError}</p>}
+                {targetDeleteError && <p className="mt-3 rounded border border-red-300/20 bg-red-300/10 p-2 text-sm text-red-100">{targetDeleteError}</p>}
+                {targetPromoteError && <p className="mt-3 rounded border border-red-300/20 bg-red-300/10 p-2 text-sm text-red-100">{targetPromoteError}</p>}
+              </div>
+            </div>
+            {modelMode === "compare" && compareAvailable && <div className="mt-4 flex flex-wrap items-center gap-2 rounded border border-white/10 bg-slate-950/40 p-3"><span className={`mr-2 rounded px-2 py-1 text-xs ${alignmentStatus === "Save failed" ? "bg-red-300/10 text-red-100" : alignmentStatus === "Unsaved changes" ? "bg-amber-300/10 text-amber-100" : "bg-emerald-300/10 text-emerald-100"}`}>{alignmentStatus}</span><button type="button" onClick={() => setCompareFitRequest((current) => current + 1)} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Fit visible models</button><button type="button" onClick={centerTargetToCurrent} className="rounded border border-brand/40 px-3 py-2 text-sm text-brand hover:bg-brand/10">Center target to current</button><button type="button" onClick={resetTargetAlignment} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Reset local alignment</button><button type="button" disabled={alignmentSaving || alignmentResetting} onClick={() => { void onSaveAlignment(); }} className="rounded border border-brand/40 px-3 py-2 text-sm text-brand hover:bg-brand/10 disabled:cursor-not-allowed disabled:opacity-50">{alignmentSaving ? "Saving…" : "Save alignment"}</button><button type="button" disabled={alignmentSaving || alignmentResetting} onClick={() => { void onResetSavedAlignment(); }} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50">{alignmentResetting ? "Resetting…" : "Reset saved alignment"}</button>{alignmentFeedback && <span className="text-xs text-emerald-200">{alignmentFeedback}</span>}{alignmentError && <span className="text-xs text-red-100">{alignmentError}</span>}</div>}
+            {modelMode === "compare" && compareAvailable && currentModelArtifact && targetModel && <section className="mt-5 rounded-md border border-brand/30 bg-brand/5 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-white">Current vs Target comparison</p><p className="mt-1 text-xs text-slate-400">Dual-model overlay is visual only. Alignment is manual; geometric comparison is not enabled yet.</p></div><p className="text-xs text-slate-500">Current URL: {currentModelUrl ? "available" : "unavailable"} · Target URL: {targetModelUrl ? "available" : "unavailable"}</p></div><div className="mt-4 flex flex-wrap items-end gap-3 rounded border border-white/10 bg-slate-950/40 p-3"><label className="flex items-center gap-2 text-sm text-slate-200"><input type="checkbox" checked={showCompareCurrent} onChange={(event) => setShowCompareCurrent(event.target.checked)} />Show Current</label><label className="flex items-center gap-2 text-sm text-slate-200"><input type="checkbox" checked={showCompareTarget} onChange={(event) => setShowCompareTarget(event.target.checked)} />Show Target</label><label className="flex min-w-44 flex-col gap-1 text-xs text-slate-400">Current opacity <input type="range" min="0" max="1" step="0.05" value={compareCurrentOpacity} onChange={(event) => setCompareCurrentOpacity(Number(event.target.value))} /><span>{Math.round(compareCurrentOpacity * 100)}%</span></label><label className="flex min-w-44 flex-col gap-1 text-xs text-slate-400">Target opacity <input type="range" min="0" max="1" step="0.05" value={compareTargetOpacity} onChange={(event) => setCompareTargetOpacity(Number(event.target.value))} /><span>{Math.round(compareTargetOpacity * 100)}%</span></label><button type="button" onClick={resetCompareVisualization} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Reset compare view</button>{!showCompareCurrent && !showCompareTarget && <p className="text-xs text-amber-100">Both layers are hidden. Enable a layer to resume the overlay.</p>}</div><div className="mt-4 rounded border border-white/10 bg-slate-950/40 p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm font-medium text-white">Target alignment</p><p className="mt-1 text-xs text-slate-400">Transforms apply only to the Target layer and are not saved.</p></div><button type="button" onClick={resetTargetAlignment} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Reset alignment</button></div><div className="mt-3 grid gap-3 md:grid-cols-5"><label className="flex flex-col gap-1 text-xs text-slate-400">Target position X <input type="range" min="-10" max="10" step="0.1" value={targetAlignment.x} onChange={(event) => setTargetAlignment((current) => ({ ...current, x: Number(event.target.value) }))} /><span>{targetAlignment.x.toFixed(1)}</span></label><label className="flex flex-col gap-1 text-xs text-slate-400">Target position Y <input type="range" min="-10" max="10" step="0.1" value={targetAlignment.y} onChange={(event) => setTargetAlignment((current) => ({ ...current, y: Number(event.target.value) }))} /><span>{targetAlignment.y.toFixed(1)}</span></label><label className="flex flex-col gap-1 text-xs text-slate-400">Target position Z <input type="range" min="-10" max="10" step="0.1" value={targetAlignment.z} onChange={(event) => setTargetAlignment((current) => ({ ...current, z: Number(event.target.value) }))} /><span>{targetAlignment.z.toFixed(1)}</span></label><label className="flex flex-col gap-1 text-xs text-slate-400">Target rotation Y <input type="range" min="-180" max="180" step="1" value={targetAlignment.rotationY} onChange={(event) => setTargetAlignment((current) => ({ ...current, rotationY: Number(event.target.value) }))} /><span>{targetAlignment.rotationY}°</span></label><label className="flex flex-col gap-1 text-xs text-slate-400">Target scale <input type="range" min="0.1" max="5" step="0.05" value={targetAlignment.scale} onChange={(event) => setTargetAlignment((current) => ({ ...current, scale: Number(event.target.value) }))} /><span>{targetAlignment.scale.toFixed(2)}×</span></label></div></div><div className="mt-4 grid gap-3 md:grid-cols-2"><div className="rounded border border-white/10 bg-slate-950/40 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-100">Current Model</p><p className="mt-2 text-sm font-medium text-white">{currentModelArtifact.filename ?? currentModelArtifact.fileName}</p><p className="mt-1 text-xs text-slate-400">{(currentModelArtifact.format ?? "unknown").toUpperCase()} · {((currentModelArtifact.sizeBytes ?? currentModelArtifact.fileSize) / 1024 / 1024).toFixed(2)} MB</p><p className="mt-1 text-xs text-slate-400">Artifact role: {currentModelArtifact.artifactRole ?? "unknown"} · Source: {currentModelArtifact.sourceTool ?? currentModelArtifact.source_type ?? "unknown"}</p></div><div className="rounded border border-white/10 bg-slate-950/40 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-brand">Target Model</p><p className="mt-2 text-sm font-medium text-white">{targetModel.filename ?? targetModel.fileName}</p><p className="mt-1 text-xs text-slate-400">{(targetModel.format ?? "unknown").toUpperCase()} · {((targetModel.sizeBytes ?? targetModel.fileSize) / 1024 / 1024).toFixed(2)} MB</p><p className="mt-1 text-xs text-slate-400">Uploaded: {targetModel.createdAt ? new Date(targetModel.createdAt).toLocaleString() : "unknown"} · Source artifact: {targetModel.sourceArtifactId ?? "manual upload"}</p></div></div></section>}
           </div>
           <div className="glass-panel mb-5 rounded-lg p-5">
             <div className="grid gap-4 md:grid-cols-6">
@@ -1187,7 +1371,11 @@ export default function ViewerPage() {
               </div>
             </div>
           )}
-          {SHOW_LEGACY_VISUAL_PREVIEW && outputSelection === "visual" ? (
+          {modelMode === "target" && targetModel ? (
+            <section className="rounded-lg border border-brand/30 bg-panel p-4 shadow-glow"><p className="mb-3 text-sm font-medium text-brand">Target Model · {targetModel.fileName}</p><RealityScanModelViewer artifact={targetModel} projectId={params.id} /></section>
+          ) : modelMode === "compare" && currentModelArtifact && targetModel ? (
+            <section className="rounded-lg border border-brand/30 bg-panel p-4 shadow-glow"><p className="mb-3 text-sm font-medium text-brand">Compare mode: Current + Target overlay</p><RealityScanModelViewer layers={compareLayers} projectId={params.id} fitRequest={compareFitRequest} onLayerCenter={onLayerCenter} /></section>
+          ) : SHOW_LEGACY_VISUAL_PREVIEW && outputSelection === "visual" ? (
             <div className="flex h-[540px] items-center justify-center rounded-lg border border-white/10 bg-slate-950 p-8 text-center shadow-glow">
               <div>
                 <p className="text-xl font-semibold text-white">{visualExportStatus === "complete" ? "Gaussian Splat export ready" : visualTrainingStatus === "running" || visualTrainingStatus === "queued" ? "Visual Preview training running" : visualManifestReady ? "Visual Preview manifest ready" : "Visual Preview not prepared"}</p>
