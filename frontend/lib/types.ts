@@ -101,12 +101,36 @@ export type ModelArtifact = {
   artifactId: string; projectId: string; artifactType: "dense_point_cloud" | "textured_mesh" | "mesh" | "gaussian_splat" | "unknown";
   sourceTool: string; fileName: string; fileSize: number; storagePath: string; relativePath: string; notes: string; role?: "current_state" | "finished_reference" | "baseline" | "comparison_result" | null;
   id?: string; project_id?: string; artifact_type?: "textured_mesh" | "mesh" | "point_cloud"; source_type?: "realityscan" | "colmap" | "imported"; job_id?: string | null;
-  format?: "obj" | "glb" | "ply" | "fbx" | null; primary_file_path?: string | null; mtl_file_path?: string | null; texture_dir_path?: string | null; status?: "pending" | "ready" | "failed"; artifactRole?: "raw_realityscan" | "cleaned_mesh" | "viewer_ready"; sourceArtifactId?: string | null; sourceJobId?: string | null; metadata?: Record<string, unknown>;
+  format?: "obj" | "glb" | "ply" | "fbx" | null; primary_file_path?: string | null; mtl_file_path?: string | null; texture_dir_path?: string | null; status?: "pending" | "ready" | "failed" | "superseded"; artifactRole?: "raw_realityscan" | "cleaned_mesh" | "viewer_ready" | "target_model"; sourceArtifactId?: string | null; sourceJobId?: string | null; metadata?: Record<string, unknown>; downloadUrl?: string; fileUrl?: string; filename?: string; sizeBytes?: number;
   stats: { vertexCount?: number; faceCount?: number | null; hasColor?: boolean; gaussianSplatDetected?: boolean; boundingBox?: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null; statsPartial?: boolean };
   importWarning?: string;
   bundle?: { originalZipPath?: string; bundleRootPath?: string; mainObjPath?: string; mainGlbPath?: string; mtlPath?: string | null; textureFiles?: string[]; textureCount?: number; mtlFound?: boolean };
   createdAt: string; updatedAt: string;
 };
+export type CompareAlignment = { positionX: number; positionY: number; positionZ: number; rotationYDegrees: number; scale: number; updatedAt?: string };
+export type FinalModelPreflightStatus = "missing" | "ready" | "warning" | "blocked";
+export type FinalModelFormat = "glb" | "obj" | "unsupported" | null;
+export type FinalModelSource = "uploaded" | "promoted" | "generated" | "unknown";
+export type FinalModelPreflightCheck = { key: string; label: string; status: "pass" | "warning" | "fail"; message: string };
+export type FinalModelPreflightResponse = {
+  projectId: string;
+  status: FinalModelPreflightStatus;
+  finalModel: { exists: boolean; artifactId: string | null; filename: string | null; format: FinalModelFormat; sizeBytes: number | null; source: FinalModelSource };
+  checks: FinalModelPreflightCheck[];
+  warnings: string[];
+  blockers: string[];
+  packageReady: boolean;
+};
+export type DeliveryFinalModelQuality = Pick<FinalModelPreflightResponse, "status" | "packageReady" | "warnings" | "blockers"> & {
+  format: FinalModelFormat;
+  sizeBytes: number | null;
+  source: FinalModelSource;
+};
+export type FinalModelInfo = ModelArtifact & { source?: FinalModelSource };
+export type FinalModelResponse = { ready: boolean; model: FinalModelInfo | null; reason?: string };
+export type DeliveryManifestItem = { kind: "final_model" | "report" | "metadata"; ready: boolean; required: boolean; filename?: string; format?: string; sizeBytes?: number; downloadUrl?: string };
+export type DeliveryMetadataPreview = { projectId: string; packageVersion: string; finalModel: { id: string; filename: string; format: string; sizeBytes: number; source?: string; createdAt?: string } | null; items: Pick<DeliveryManifestItem, "kind" | "ready" | "required">[]; missingRequired: string[] };
+export type DeliveryManifest = { ready: boolean; projectId: string; items: DeliveryManifestItem[]; missingRequired: string[]; notes: string[]; packageFilename: string; packageVersion: string; downloadable: boolean; downloadUrl: string | null; metadataPreview: DeliveryMetadataPreview; finalModelQuality?: DeliveryFinalModelQuality };
 export type ModelArtifactSummary = { artifacts: ModelArtifact[]; measurementArtifactCount: number; latestDensePointCloud: ModelArtifact | null; latestMesh: ModelArtifact | null; latestReferenceModel: ModelArtifact | null; latestCurrentStateModel: ModelArtifact | null; preferredModelArtifact?: ModelArtifact | null; comparisonReady: boolean; comparisonCount: number; latestComparison: { comparisonId: string; status: string } | null; message: string };
 export type ArtifactComparison = { comparisonId: string; projectId: string; referenceArtifactId: string; currentArtifactId: string; status: string; notes: string; createdAt: string; updatedAt: string; referenceArtifact: ModelArtifact; currentArtifact: ModelArtifact; comparable: boolean; warning?: string | null; recommendation: string; analysisStatus?: string; warnings?: string[]; roughBoundsDelta?: { referenceSize?: Record<string,number>; currentSize?: Record<string,number>; scaleRatios?: number[] } | null; scaleMismatchWarning?: string | null; noProgressPercentageReason?: string | null };
 export type RealityScanDiagnostics = { available: boolean; enabled: boolean; executable_path: string | null; executable_exists: boolean; export_params_path: string | null; export_params_exists: boolean; headless_supported: "unknown"; notes: string[] };

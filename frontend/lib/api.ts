@@ -1,4 +1,4 @@
-import type { Annotation, ArtifactComparison, CaptureSummary, Diagnostics, ExtractionFpsMode, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, ModelPreviewDiagnostics, ModelPreviewStatus, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, CompareAlignment, DeliveryManifest, Diagnostics, ExtractionFpsMode, FinalModelPreflightResponse, FinalModelResponse, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, ModelPreviewDiagnostics, ModelPreviewStatus, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -200,6 +200,52 @@ export function getReport(projectId: string) {
 
 export function listModelArtifacts(projectId: string) {
   return request<ModelArtifactSummary>(`/projects/${projectId}/model-artifacts`);
+}
+
+export function uploadTargetModel(projectId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return request<ModelArtifact>(`/projects/${projectId}/target-model`, { method: "POST", body: form });
+}
+
+export function getTargetModel(projectId: string) {
+  return request<ModelArtifact | null>(`/projects/${projectId}/target-model`);
+}
+
+export function deleteTargetModel(projectId: string) {
+  return request<{ deleted: boolean; message: string }>(`/projects/${projectId}/target-model`, { method: "DELETE" });
+}
+
+export function promoteTargetModel(projectId: string, artifactId?: string) {
+  return request<ModelArtifact>(`/projects/${projectId}/target-model/promote`, { method: "POST", body: JSON.stringify(artifactId ? { artifactId } : {}) });
+}
+
+export function getCompareAlignment(projectId: string) {
+  return request<CompareAlignment>(`/projects/${projectId}/compare-alignment`);
+}
+
+export function saveCompareAlignment(projectId: string, alignment: CompareAlignment) {
+  return request<CompareAlignment>(`/projects/${projectId}/compare-alignment`, { method: "PUT", body: JSON.stringify(alignment) });
+}
+
+export function resetCompareAlignment(projectId: string) {
+  return request<CompareAlignment>(`/projects/${projectId}/compare-alignment`, { method: "DELETE" });
+}
+
+export function getFinalModel(projectId: string) {
+  return request<FinalModelResponse>(`/projects/${projectId}/final-model`);
+}
+
+export function getFinalModelPreflight(projectId: string) {
+  return request<FinalModelPreflightResponse>(`/projects/${projectId}/final-model/preflight`);
+}
+
+export function getDeliveryManifest(projectId: string) {
+  return request<DeliveryManifest>(`/projects/${projectId}/delivery-manifest`);
+}
+
+export function deliveryPackageDownloadUrl(projectId: string) {
+  return `${API_BASE}/projects/${projectId}/delivery-package.zip`;
 }
 
 export function importModelArtifact(projectId: string, file: File, payload: { artifactType: string; sourceTool: string; notes?: string; role?: string }) {
