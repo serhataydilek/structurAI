@@ -100,14 +100,46 @@ class DeliveryPackageApiTests(unittest.TestCase):
         self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
         self.assertFalse((database.PROCESSED_DIR / self.project_id / "delivery_packages").exists())
 
-    def test_legacy_in_memory_download_remains_available(self):
-        self.upload("final.glb", b"glTF\x02\x00\x00\x00")
+    def test_manifest_exposes_latest_package_and_legacy_route_downloads_it(self):
+        uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00")
+        model_path = Path(uploaded["primary_file_path"])
+        thumbnail = model_path.with_name(f"{model_path.stem}.thumbnail.png")
+        thumbnail.write_bytes(b"original-preview")
+
+        before = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
+        self.assertIsNone(before["latestPackage"])
+        self.assertFalse(before["downloadable"])
+        self.assertIsNone(before["downloadUrl"])
+        self.assertEqual(before["packageVersion"], "1.0")
+        self.assertEqual(before["packageFormatVersion"], "1.0")
+
+        first = self.generate()
+        first_record = delivery_package_repository.get_package(first["id"])
+        first_bytes = Path(first_record["storagePath"]).read_bytes()
+        thumbnail.write_bytes(b"changed-preview")
 
         response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, first_bytes)
         with zipfile.ZipFile(BytesIO(response.content)) as archive:
-            self.assertEqual(set(archive.namelist()), {"final_model.glb", "delivery-metadata.json"})
+            self.assertEqual(archive.read("final_model_preview.png"), b"original-preview")
+        manifest = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
+        self.assertTrue(manifest["downloadable"])
+        self.assertEqual(manifest["downloadUrl"], first["downloadUrl"])
+        self.assertEqual(manifest["latestPackage"], first)
+
+        second = self.generate()
+        latest_manifest = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
+        self.assertEqual(latest_manifest["latestPackage"], second)
+        self.assertEqual(latest_manifest["downloadUrl"], second["downloadUrl"])
+
+    def test_legacy_route_returns_not_found_before_package_generation(self):
+        self.upload("final.glb", b"glTF\x02\x00\x00\x00")
+
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
 
 

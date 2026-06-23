@@ -1,12 +1,11 @@
 from pathlib import Path
-from io import BytesIO
 import json
 import os
 import shutil
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -538,20 +537,23 @@ def get_delivery_manifest(project_id: str) -> dict:
         "items": [{key: item.get(key) for key in ("kind", "ready", "required")} for item in items],
         "missingRequired": missing,
     }
+    latest_record = delivery_package_repository.get_latest_package(project_id)
+    latest_package = delivery_package_service.package_record_to_api(latest_record) if latest_record else None
     return {"ready": ready, "projectId": project_id, "items": items, "missingRequired": missing, "notes": notes,
             "packageFilename": f"structura-project-{project_id}-delivery.zip", "packageVersion": "1.0",
-            "downloadable": ready, "downloadUrl": f"/projects/{project_id}/delivery-package.zip" if ready else None,
+            "packageFormatVersion": "1.0", "latestPackage": latest_package,
+            "downloadable": latest_package is not None, "downloadUrl": latest_package["downloadUrl"] if latest_package else None,
             "metadataPreview": metadata_preview, "finalModelQuality": final_model_quality}
 
 
 @app.get("/projects/{project_id}/delivery-package.zip")
 def download_delivery_package(project_id: str):
-    manifest = get_delivery_manifest(project_id)
-    try:
-        archive, _ = delivery_package_service.build_delivery_package(project_id, manifest)
-    except delivery_package_service.DeliveryPackageError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    return StreamingResponse(BytesIO(archive), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    record = delivery_package_repository.get_latest_package(project_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Delivery package has not been generated yet")
+    return _persisted_delivery_package_response(project_id, record)
 
 
 @app.post("/projects/{project_id}/delivery-packages", status_code=201)
@@ -579,6 +581,10 @@ def download_persisted_delivery_package(project_id: str, package_id: str) -> Fil
     record = delivery_package_repository.get_package_for_project(project_id, package_id)
     if not record:
         raise HTTPException(status_code=404, detail="Delivery package not found")
+    return _persisted_delivery_package_response(project_id, record)
+
+
+def _persisted_delivery_package_response(project_id: str, record: dict) -> FileResponse:
     path = Path(record["storagePath"]).resolve()
     managed_root = (PROCESSED_DIR / project_id / "delivery_packages").resolve()
     if not path.is_file() or managed_root not in path.parents:

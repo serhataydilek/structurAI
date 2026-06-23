@@ -48,6 +48,11 @@ class TargetModelApiTests(unittest.TestCase):
     def upload(self, name: str, content: bytes):
         return self.client.post(f"/projects/{self.project_id}/target-model", files={"file": (name, content)})
 
+    def download_latest_delivery_package(self):
+        generated = self.client.post(f"/projects/{self.project_id}/delivery-packages")
+        self.assertEqual(generated.status_code, 201)
+        return self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+
     def generated_artifact(self, project_id: str | None = None, *, name: str = "current.glb", content: bytes = b"glTF\x02\x00\x00\x00", role: str = "viewer_ready"):
         project_id = project_id or self.project_id
         root = database.PROCESSED_DIR / project_id / "model_artifacts"
@@ -317,8 +322,9 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertTrue(final_item["ready"])
         self.assertEqual(final_item["filename"], uploaded["filename"])
         self.assertEqual(manifest["packageFilename"], f"structura-project-{self.project_id}-delivery.zip")
-        self.assertTrue(manifest["downloadable"])
-        self.assertEqual(manifest["downloadUrl"], f"/projects/{self.project_id}/delivery-package.zip")
+        self.assertFalse(manifest["downloadable"])
+        self.assertIsNone(manifest["downloadUrl"])
+        self.assertIsNone(manifest["latestPackage"])
         self.assertEqual(manifest["metadataPreview"]["finalModel"]["filename"], uploaded["filename"])
         self.assertEqual(manifest["finalModelQuality"]["status"], "warning")
         self.assertTrue(manifest["finalModelQuality"]["packageReady"])
@@ -387,9 +393,9 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertTrue(quality["blockers"])
 
     def test_delivery_zip_contains_model_and_metadata(self):
-        self.assertEqual(self.client.get(f"/projects/{self.project_id}/delivery-package.zip").status_code, 400)
+        self.assertEqual(self.client.get(f"/projects/{self.project_id}/delivery-package.zip").status_code, 404)
         self.upload("final.glb", b"glTF\x02\x00\x00\x00")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             self.assertIn("final_model.glb", package.namelist())
@@ -407,7 +413,7 @@ class TargetModelApiTests(unittest.TestCase):
         model_path = Path(uploaded["primary_file_path"])
         (model_path.parent / "final.mtl").write_text("newmtl material\nmap_Kd albedo.png\n")
         (model_path.parent / "albedo.png").write_bytes(b"png")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "delivery-metadata.json"})
@@ -417,7 +423,7 @@ class TargetModelApiTests(unittest.TestCase):
 
     def test_standalone_obj_delivery_zip_remains_valid(self):
         self.upload("final.obj", b"v 0 0 0\n")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             self.assertEqual(set(package.namelist()), {"final_model.obj", "delivery-metadata.json"})
@@ -429,7 +435,7 @@ class TargetModelApiTests(unittest.TestCase):
         uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00").json()
         model_path = Path(uploaded["primary_file_path"])
         model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"png")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             self.assertEqual(set(package.namelist()), {"final_model.glb", "final_model_preview.png", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
@@ -441,7 +447,7 @@ class TargetModelApiTests(unittest.TestCase):
         (model_path.parent / "final.mtl").write_text("newmtl material\n")
         (model_path.parent / "albedo.png").write_bytes(b"png")
         model_path.with_name(f"{model_path.stem}.thumbnail.jpg").write_bytes(b"jpg")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
@@ -453,7 +459,7 @@ class TargetModelApiTests(unittest.TestCase):
         model_path = Path(uploaded["primary_file_path"])
         (model_path.parent / "final_model_preview.png").write_bytes(b"texture")
         model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"thumbnail")
-        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        response = self.download_latest_delivery_package()
         with zipfile.ZipFile(BytesIO(response.content)) as package:
             names = package.namelist()
             self.assertEqual(names.count("final_model_preview.png"), 1)

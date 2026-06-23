@@ -108,14 +108,12 @@ class DeliveryPackageServiceTests(unittest.TestCase):
         self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
         self.assertFalse((database.PROCESSED_DIR / self.project_id / "delivery_packages").exists())
 
-    def test_existing_get_delivery_zip_remains_in_memory_and_unpersisted(self):
+    def test_legacy_get_delivery_zip_requires_a_persisted_package(self):
         self.upload("final.glb", b"glTF\x02\x00\x00\x00")
 
         response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
 
-        self.assertEqual(response.status_code, 200)
-        with zipfile.ZipFile(BytesIO(response.content)) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.glb", "delivery-metadata.json"})
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
 
 
