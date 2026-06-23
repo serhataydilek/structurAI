@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { API_BASE, deliveryPackageDownloadUrl, getDeliveryManifest, getFinalModel, getReport } from "@/lib/api";
-import type { DeliveryManifest, FinalModelResponse, Report } from "@/lib/types";
+import { API_BASE, createDeliveryPackage, getDeliveryManifest, getFinalModel, getReport, listDeliveryPackages } from "@/lib/api";
+import type { DeliveryManifest, DeliveryPackage, FinalModelResponse, Report } from "@/lib/types";
 import { AlertTriangle, ArrowLeft, CheckCircle2 } from "lucide-react";
 
 export default function ReportPage() {
@@ -13,6 +13,9 @@ export default function ReportPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [finalModel, setFinalModel] = useState<FinalModelResponse | null>(null);
   const [deliveryManifest, setDeliveryManifest] = useState<DeliveryManifest | null>(null);
+  const [deliveryPackages, setDeliveryPackages] = useState<DeliveryPackage[]>([]);
+  const [generatingDeliveryPackage, setGeneratingDeliveryPackage] = useState(false);
+  const [deliveryPackageMessage, setDeliveryPackageMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const finalModelQuality = deliveryManifest?.finalModelQuality;
   const finalModelQualityLabel = finalModelQuality ? `${finalModelQuality.status.charAt(0).toUpperCase()}${finalModelQuality.status.slice(1)}` : null;
@@ -21,6 +24,7 @@ export default function ReportPage() {
   const finalModelBundleLabel = finalModelBundle ? `OBJ bundle: ${finalModelBundle.hasMtl ? `${finalModelBundle.mtlFileCount} MTL${finalModelBundle.mtlFileCount === 1 ? "" : "s"}` : "no MTL"} · ${finalModelBundle.hasTextures ? `${finalModelBundle.textureFileCount} texture${finalModelBundle.textureFileCount === 1 ? "" : "s"}` : "no textures"} · package support: ${finalModelBundle.supportedForPackaging ? "enabled" : "not enabled"}` : null;
   const finalModelThumbnail = finalModelQuality?.thumbnail;
   const finalModelThumbnailLabel = finalModelThumbnail ? `Preview image: ${finalModelThumbnail.available ? `available · ${finalModelThumbnail.format.toUpperCase()} · ${finalModelThumbnail.supportedForPackaging ? "packaged" : "not packaged"}` : "not available"}` : "Preview image: not available";
+  const canGenerateDeliveryPackage = Boolean(deliveryManifest?.ready && finalModelQuality?.packageReady !== false);
   const denseLogEntries = Object.entries(report?.reconstructionMetadata?.denseLogPreviewSummary ?? {}).filter(([, value]) => value.trim().length > 0);
   const bestAttempt = report?.reconstructionMetadata?.bestAttempt;
   const latestAttempt = report?.reconstructionMetadata?.latestAttempt;
@@ -72,6 +76,7 @@ export default function ReportPage() {
     setRefreshing(true);
     getFinalModel(params.id).then(setFinalModel).catch(() => setFinalModel(null));
     getDeliveryManifest(params.id).then(setDeliveryManifest).catch(() => setDeliveryManifest(null));
+    listDeliveryPackages(params.id).then(setDeliveryPackages).catch(() => setDeliveryPackages([]));
     getReport(params.id)
       .then((next) => {
         setReport(next);
@@ -82,6 +87,23 @@ export default function ReportPage() {
       })
       .finally(() => setRefreshing(false));
   }, [params.id]);
+
+  async function generateDeliveryPackage() {
+    if (!canGenerateDeliveryPackage || generatingDeliveryPackage) return;
+    setGeneratingDeliveryPackage(true);
+    setDeliveryPackageMessage(null);
+    try {
+      const generated = await createDeliveryPackage(params.id);
+      const [manifest, packages] = await Promise.all([getDeliveryManifest(params.id), listDeliveryPackages(params.id)]);
+      setDeliveryManifest(manifest);
+      setDeliveryPackages(packages);
+      setDeliveryPackageMessage(`Delivery package v${generated.version} generated.`);
+    } catch (error) {
+      setDeliveryPackageMessage(error instanceof Error ? error.message : "Unable to generate the delivery package.");
+    } finally {
+      setGeneratingDeliveryPackage(false);
+    }
+  }
 
   function attemptStatus(attempt: { status: string; registeredImageCount?: number; sparsePointCount?: number; attemptDisplayStatus?: string }) {
     if (attempt.attemptDisplayStatus) return attempt.attemptDisplayStatus;
@@ -273,7 +295,26 @@ export default function ReportPage() {
               <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-white">Final Model</p><p className={`mt-1 text-sm font-medium ${finalModel?.ready ? "text-emerald-100" : "text-amber-100"}`}>{finalModel?.ready ? "Ready" : "Not ready"}</p>{finalModelQuality && <p className={`mt-1 text-xs ${finalModelQuality.status === "ready" ? "text-emerald-200" : finalModelQuality.status === "warning" ? "text-amber-100" : "text-rose-200"}`}>Quality: {finalModelQualityLabel}{finalModelQuality.format ? ` · ${finalModelQuality.format.toUpperCase()}` : ""}{finalModelQuality.source && finalModelQuality.status !== "missing" ? ` · ${finalModelQuality.source}` : ""}{finalModelQualityIssueCount > 0 ? ` · ${finalModelQualityIssueCount} ${finalModelQuality.status === "warning" ? "warning" : "blocker"}${finalModelQualityIssueCount === 1 ? "" : "s"}` : ""}</p>}{finalModel?.model ? <><p className="mt-3 text-sm text-white">{finalModel.model.filename ?? finalModel.model.fileName}</p><p className="mt-1 text-xs text-slate-300">{(finalModel.model.format ?? "unknown").toUpperCase()} · {((finalModel.model.sizeBytes ?? finalModel.model.fileSize) / 1024 / 1024).toFixed(2)} MB · {finalModel.model.source ?? "unknown"} · {finalModel.model.createdAt ? new Date(finalModel.model.createdAt).toLocaleString() : "unknown date"}</p></> : <p className="mt-3 text-sm text-slate-300">{finalModel?.reason ?? "Upload a target model or promote the current model to create a final deliverable."}</p>}</div><div className="flex flex-wrap gap-2">{finalModel?.ready && finalModel.model?.downloadUrl && <a href={`${API_BASE}${finalModel.model.downloadUrl}`} className="rounded border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Download final model</a>}<Link href={`/projects/${params.id}/viewer`} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Open viewer</Link></div></div>
               {!finalModel?.ready && <p className="mt-3 text-xs text-slate-400">Upload a target model or promote the current model to create a final deliverable.</p>}
             </section>
-            <section className={`mt-4 rounded-lg border p-5 ${deliveryManifest?.ready ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-white/[0.03]"}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-sm font-semibold text-white">Delivery Package</p><p className={`mt-1 text-sm font-medium ${deliveryManifest?.ready ? "text-emerald-100" : "text-amber-100"}`}>{deliveryManifest?.ready ? "Ready" : "Not ready"}</p></div>{deliveryManifest?.ready ? <a href={deliveryPackageDownloadUrl(params.id)} className="rounded border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10">Download delivery ZIP</a> : <Link href={`/projects/${params.id}/viewer`} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Open viewer</Link>}</div>{deliveryManifest && <><div className="mt-4 space-y-2">{deliveryManifest.items.map((item) => <div key={item.kind} className="flex flex-wrap items-center justify-between gap-3 rounded border border-white/10 bg-slate-950/30 p-3 text-sm"><div><p className="font-medium text-white">{item.kind.replace("_", " ")}</p><p className="mt-1 text-xs text-slate-400">{item.filename ?? "Unavailable"}{item.format ? ` · ${item.format.toUpperCase()}` : ""}{item.sizeBytes ? ` · ${(item.sizeBytes / 1024 / 1024).toFixed(2)} MB` : ""}</p></div><div className="flex items-center gap-2"><span className={`text-xs ${item.ready ? "text-emerald-200" : "text-amber-100"}`}>{item.ready ? "Ready" : "Not ready"}</span><span className="text-xs text-slate-500">{item.required ? "Required" : "Optional"}</span>{item.downloadUrl && <a href={`${API_BASE}${item.downloadUrl}`} className="text-xs text-brand hover:text-cyan-100">Download</a>}</div></div>)}</div>{finalModelQuality && <div className="mt-3 rounded border border-white/10 bg-slate-950/30 p-3 text-xs text-slate-300"><p className={`font-medium ${finalModelQuality.status === "ready" ? "text-emerald-200" : finalModelQuality.status === "warning" ? "text-amber-100" : "text-rose-200"}`}>Final model quality: {finalModelQualityLabel}</p><p className="mt-1">Package ready: {finalModelQuality.packageReady ? "Yes" : "No"}{finalModelQuality.format ? ` · ${finalModelQuality.format.toUpperCase()}` : ""}{finalModelQuality.sizeBytes !== null ? ` · ${(finalModelQuality.sizeBytes / 1024 / 1024).toFixed(2)} MB` : ""}{finalModelQuality.source ? ` · ${finalModelQuality.source}` : ""}</p><p className={`mt-1 ${finalModelThumbnail?.available ? "text-emerald-200" : "text-slate-400"}`}>{finalModelThumbnailLabel}</p>{finalModelBundleLabel && <p className="mt-1 text-slate-400">{finalModelBundleLabel}</p>}{finalModelQuality.warnings.length > 0 && <ul className="mt-2 list-inside list-disc space-y-1 text-amber-100">{finalModelQuality.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{finalModelQuality.blockers.length > 0 && <ul className="mt-2 list-inside list-disc space-y-1 text-rose-200">{finalModelQuality.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}</div>}{deliveryManifest.missingRequired.length > 0 && <p className="mt-3 text-sm text-amber-100">Add a final model by uploading a target model or promoting the current model.</p>}{deliveryManifest.notes.length > 0 && <ul className="mt-3 space-y-1 text-xs text-slate-400">{deliveryManifest.notes.map((note) => <li key={note}>{note}</li>)}</ul>}</>}</section>
+            <section className={`mt-4 rounded-lg border p-5 ${deliveryManifest?.ready ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-white/[0.03]"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><p className="text-sm font-semibold text-white">Delivery Package</p><p className={`mt-1 text-sm font-medium ${deliveryManifest?.ready ? "text-emerald-100" : "text-amber-100"}`}>{deliveryManifest?.ready ? "Ready to generate" : "Not ready"}</p></div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={generateDeliveryPackage} disabled={!canGenerateDeliveryPackage || generatingDeliveryPackage} className="rounded border border-brand/40 px-3 py-2 text-sm font-medium text-brand hover:bg-brand/10 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-500">{generatingDeliveryPackage ? "Generating package..." : "Generate delivery package"}</button>
+                  {deliveryManifest?.latestPackage && <a href={`${API_BASE}${deliveryManifest.latestPackage.downloadUrl}`} className="rounded border border-white/20 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Download latest package</a>}
+                </div>
+              </div>
+              {deliveryPackageMessage && <p className={`mt-3 text-xs ${deliveryPackageMessage.startsWith("Delivery package") ? "text-emerald-200" : "text-rose-200"}`}>{deliveryPackageMessage}</p>}
+              {deliveryManifest && <>
+                <div className="mt-4 space-y-2">{deliveryManifest.items.map((item) => <div key={item.kind} className="flex flex-wrap items-center justify-between gap-3 rounded border border-white/10 bg-slate-950/30 p-3 text-sm"><div><p className="font-medium text-white">{item.kind.replace("_", " ")}</p><p className="mt-1 text-xs text-slate-400">{item.filename ?? "Unavailable"}{item.format ? ` · ${item.format.toUpperCase()}` : ""}{item.sizeBytes ? ` · ${(item.sizeBytes / 1024 / 1024).toFixed(2)} MB` : ""}</p></div><div className="flex items-center gap-2"><span className={`text-xs ${item.ready ? "text-emerald-200" : "text-amber-100"}`}>{item.ready ? "Ready" : "Not ready"}</span><span className="text-xs text-slate-500">{item.required ? "Required" : "Optional"}</span>{item.downloadUrl && <a href={`${API_BASE}${item.downloadUrl}`} className="text-xs text-brand hover:text-cyan-100">Download</a>}</div></div>)}</div>
+                {finalModelQuality && <div className="mt-3 rounded border border-white/10 bg-slate-950/30 p-3 text-xs text-slate-300"><p className={`font-medium ${finalModelQuality.status === "ready" ? "text-emerald-200" : finalModelQuality.status === "warning" ? "text-amber-100" : "text-rose-200"}`}>Final model quality: {finalModelQualityLabel}</p><p className="mt-1">Package ready: {finalModelQuality.packageReady ? "Yes" : "No"}{finalModelQuality.format ? ` · ${finalModelQuality.format.toUpperCase()}` : ""}{finalModelQuality.sizeBytes !== null ? ` · ${(finalModelQuality.sizeBytes / 1024 / 1024).toFixed(2)} MB` : ""}{finalModelQuality.source ? ` · ${finalModelQuality.source}` : ""}</p><p className={`mt-1 ${finalModelThumbnail?.available ? "text-emerald-200" : "text-slate-400"}`}>{finalModelThumbnailLabel}</p>{finalModelBundleLabel && <p className="mt-1 text-slate-400">{finalModelBundleLabel}</p>}{finalModelQuality.warnings.length > 0 && <ul className="mt-2 list-inside list-disc space-y-1 text-amber-100">{finalModelQuality.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}{finalModelQuality.blockers.length > 0 && <ul className="mt-2 list-inside list-disc space-y-1 text-rose-200">{finalModelQuality.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}</div>}
+                <div className="mt-3 rounded border border-white/10 bg-slate-950/30 p-3 text-xs text-slate-300">
+                  {deliveryManifest.latestPackage ? <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium text-white">Latest persisted package · v{deliveryManifest.latestPackage.version}</p><p className="mt-1 text-slate-400">{deliveryManifest.latestPackage.filename} · {(deliveryManifest.latestPackage.sizeBytes / 1024 / 1024).toFixed(2)} MB · {new Date(deliveryManifest.latestPackage.createdAt).toLocaleString()}</p></div><a href={`${API_BASE}${deliveryManifest.latestPackage.downloadUrl}`} className="text-brand hover:text-cyan-100">Download package</a></div> : <p className="text-slate-400">No delivery package generated yet. Generate a package when the final model is ready.</p>}
+                  {deliveryPackages.length > 0 && <div className="mt-3 border-t border-white/10 pt-3"><p className="font-medium text-white">Package history</p><div className="mt-2 space-y-2">{deliveryPackages.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2"><span>v{item.version} · {(item.sizeBytes / 1024 / 1024).toFixed(2)} MB · {new Date(item.createdAt).toLocaleString()}</span><a href={`${API_BASE}${item.downloadUrl}`} className="text-brand hover:text-cyan-100">Download</a></div>)}</div></div>}
+                </div>
+                {deliveryManifest.missingRequired.length > 0 && <p className="mt-3 text-sm text-amber-100">Add a final model by uploading a target model or promoting the current model.</p>}
+                {deliveryManifest.notes.length > 0 && <ul className="mt-3 space-y-1 text-xs text-slate-400">{deliveryManifest.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+              </>}
+            </section>
             {deliveryManifest && <div className="mt-3 rounded border border-white/10 bg-slate-950/30 p-3 text-xs text-slate-300"><div className="flex flex-wrap justify-between gap-2"><span>Package preview: {deliveryManifest.packageFilename}</span><span>Version {deliveryManifest.packageVersion}</span></div><div className="mt-2 grid gap-2 sm:grid-cols-2"><span>Metadata: {deliveryManifest.metadataPreview.projectId} · {deliveryManifest.metadataPreview.finalModel ? `${deliveryManifest.metadataPreview.finalModel.filename} (${deliveryManifest.metadataPreview.finalModel.source ?? "unknown"})` : "No final model"}</span><span>{deliveryManifest.metadataPreview.missingRequired.length ? `Missing: ${deliveryManifest.metadataPreview.missingRequired.join(", ")}` : "All required items ready"}</span></div></div>}
             <section className="mt-4 rounded-lg border border-brand/25 bg-brand/10 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
