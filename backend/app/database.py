@@ -209,6 +209,17 @@ def init_db() -> None:
                 FOREIGN KEY (current_artifact_id) REFERENCES model_artifacts(artifact_id)
             );
 
+            CREATE TABLE IF NOT EXISTS project_compare_alignments (
+                project_id TEXT PRIMARY KEY,
+                position_x REAL NOT NULL DEFAULT 0,
+                position_y REAL NOT NULL DEFAULT 0,
+                position_z REAL NOT NULL DEFAULT 0,
+                rotation_y_degrees REAL NOT NULL DEFAULT 0,
+                scale REAL NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS photogrammetry_jobs (
                 job_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, engine TEXT NOT NULL, status TEXT NOT NULL,
                 input_image_folder TEXT NOT NULL, output_folder TEXT NOT NULL, command_file_path TEXT,
@@ -248,8 +259,25 @@ def init_db() -> None:
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS delivery_packages (
+                package_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                storage_path TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (project_id, version),
+                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_realityscan_jobs_project_created
             ON realityscan_jobs (project_id, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_delivery_packages_project_created
+            ON delivery_packages (project_id, created_at DESC);
             """
         )
         _ensure_column(conn, "capture_metadata", "selected_fps_mode", "TEXT NOT NULL DEFAULT 'Balanced'")

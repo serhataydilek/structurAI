@@ -46,6 +46,16 @@ class ModelArtifactPriorityTests(unittest.TestCase):
              patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
             self.assertIsNone(model_artifact_service.summary("project")["preferredModelArtifact"])
 
+    def test_target_model_is_excluded_from_generated_model_selection(self):
+        target = artifact("target_model", format="glb", source="manual")
+        raw = artifact("raw_realityscan")
+        with patch.object(model_artifact_service.model_artifact_repository, "list_artifacts", return_value=[target, raw]), \
+             patch.object(model_artifact_service.model_artifact_repository, "list_comparisons", return_value=[]), \
+             patch.object(model_artifact_service, "_is_gaussian_splat", return_value=False):
+            summary = model_artifact_service.summary("project")
+        self.assertEqual(summary["preferredModelArtifact"]["artifactId"], raw["artifactId"])
+        self.assertNotIn(target["artifactId"], [item["artifactId"] for item in summary["comparisonCandidates"]])
+
     def test_derived_registration_rejects_raw_path_and_leaves_raw_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             raw = Path(directory) / "raw.obj"; raw.write_text("raw geometry")

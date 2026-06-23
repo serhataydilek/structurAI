@@ -15,6 +15,7 @@ TEXTURE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
 ARTIFACT_TYPES = {"dense_point_cloud", "textured_mesh", "mesh", "gaussian_splat", "unknown"}
 SOURCE_TOOLS = {"realitycapture", "realityscan", "metashape", "pix4d", "cloudcompare", "manual", "unknown"}
 ROLES = {"current_state", "finished_reference", "baseline", "comparison_result"}
+ARTIFACT_ROLES = {"raw_realityscan", "cleaned_mesh", "viewer_ready", "target_model"}
 JOB_KEY = "model_artifact_import"
 DEFAULT_MAX_GLB_MB = 250
 DEFAULT_MAX_FACES_FOR_VIEWER = 500_000
@@ -338,12 +339,71 @@ def import_artifact(project_id: str, source_path: Path, original_name: str, arti
     return artifact
 
 
+def import_target_model(project_id: str, source_path: Path, original_name: str, *, source_artifact_id: str | None = None) -> dict:
+    """Store a user-supplied final model independently from generated artifacts."""
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in {".glb", ".obj"}:
+        raise ModelArtifactError("Only .glb and .obj target models are supported")
+    if not source_path.is_file():
+        raise ModelArtifactError("Target model file was not found")
+    target_dir = PROCESSED_DIR / project_id / "target_models"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(original_name).name
+    target = target_dir / f"{uuid4()}_{safe_name}"
+    shutil.copyfile(source_path, target)
+    bundle = {"mainGlbPath": str(target)} if suffix == ".glb" else {"mainObjPath": str(target)}
+    # Keep replacement history out of GET /target-model while retaining its artifact record.
+    model_artifact_repository.supersede_ready_artifacts_by_role(project_id, "target_model")
+    return model_artifact_repository.add_artifact(
+        project_id, "mesh", "manual", safe_name, target.stat().st_size,
+        str(target), str(target.relative_to(PROCESSED_DIR)), "User-uploaded target model", None,
+        parse_stats(target), bundle, model_format=suffix.lstrip("."), primary_file_path=str(target), status="ready",
+        metadata={"artifactRole": "target_model", **({"sourceArtifactId": source_artifact_id} if source_artifact_id else {})},
+    )
+
+
+def _artifact_model_path(artifact: dict) -> Path:
+    bundle = artifact.get("bundle") or {}
+    return Path(bundle.get("mainGlbPath") or bundle.get("mainObjPath") or artifact.get("primary_file_path") or artifact["storagePath"])
+
+
+def promote_target_model(project_id: str, artifact: dict | None = None) -> dict:
+    """Copy a generated browser-viewable artifact into independent target-model storage."""
+    source = artifact or model_artifact_repository.get_latest_ready_artifact(project_id)
+    if not source:
+        raise ModelArtifactError("No promotable current/generated model is available")
+    if source.get("artifactRole") == "target_model":
+        raise ModelArtifactError("Target model artifacts cannot be promoted again")
+    if source.get("status") != "ready":
+        raise ModelArtifactError("Only ready generated model artifacts can be promoted")
+    source_path = _artifact_model_path(source)
+    if source_path.suffix.lower() not in {".glb", ".obj"}:
+        raise ModelArtifactError("Only .glb and .obj generated model artifacts can be promoted")
+    if not source_path.is_file():
+        raise ModelArtifactError("Generated model file is unavailable for promotion")
+    source_name = source["fileName"] if Path(source["fileName"]).suffix.lower() in {".glb", ".obj"} else source_path.name
+    return import_target_model(project_id, source_path, source_name, source_artifact_id=source["artifactId"])
+
+
+def delete_latest_target_model(project_id: str) -> bool:
+    artifact = model_artifact_repository.get_latest_by_artifact_role(project_id, "target_model")
+    if not artifact:
+        return False
+    target_root = (PROCESSED_DIR / project_id / "target_models").resolve()
+    path = Path(artifact.get("primary_file_path") or artifact["storagePath"]).resolve()
+    if path.is_file() and target_root in path.parents:
+        path.unlink()
+    return model_artifact_repository.delete_artifact(project_id, artifact["artifactId"])
+
+
 def summary(project_id: str) -> dict:
     artifacts = model_artifact_repository.list_artifacts(project_id)
     for artifact in artifacts:
         if _is_gaussian_splat(artifact) and artifact["artifactType"] != "gaussian_splat":
             artifact["importWarning"] = "Gaussian Splat header detected. Preview-only. Not measurement-grade; do not use as finished/current progress comparison input."
-    measurement_artifacts = [item for item in artifacts if item["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not _is_gaussian_splat(item)]
+    # Target models are intentionally a separate viewer input, never generated/current pipeline input.
+    generated_artifacts = [item for item in artifacts if item.get("artifactRole") != "target_model"]
+    measurement_artifacts = [item for item in generated_artifacts if item["artifactType"] in {"dense_point_cloud", "mesh", "textured_mesh"} and not _is_gaussian_splat(item)]
     latest = lambda collection, predicate: next((item for item in collection if predicate(item)), None)
     ready_artifacts = [item for item in measurement_artifacts if item.get("status") == "ready"]
     realityscan_artifacts = [item for item in ready_artifacts if item.get("source_type") == "realityscan"]
@@ -369,7 +429,7 @@ def summary(project_id: str) -> dict:
     else:
         message = "Progress comparison requires two distinct artifacts: a finished reference and a current-state model."
     return {"artifacts": artifacts, "measurementArtifactCount": len(measurement_artifacts),
-            "comparisonCandidates": [comparison_candidate(item) for item in artifacts],
+            "comparisonCandidates": [comparison_candidate(item) for item in generated_artifacts],
             "latestDensePointCloud": latest(measurement_artifacts, lambda item: item["artifactType"] == "dense_point_cloud"),
             "latestMesh": latest(realityscan_artifacts, lambda item: item["artifactType"] == "textured_mesh") or latest(measurement_artifacts, lambda item: item["artifactType"] in {"mesh", "textured_mesh"}), "latestReferenceModel": reference,
             "latestCurrentStateModel": current, "comparisonReady": comparison_ready, "comparisonCount": len(measurement_comparisons),

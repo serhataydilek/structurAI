@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 import shutil
 from uuid import uuid4
@@ -10,8 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, capture_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
-from app.services import comparison_analysis_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
+from app.repositories import annotation_repository, capture_repository, compare_alignment_repository, delivery_package_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
+from app.services import comparison_analysis_service, delivery_package_service, final_model_preflight_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -93,6 +94,18 @@ class ComparisonCreate(BaseModel):
 
 class ArtifactRoleUpdate(BaseModel):
     role: str | None = None
+
+
+class TargetModelPromote(BaseModel):
+    artifactId: str | None = None
+
+
+class CompareAlignmentPayload(BaseModel):
+    positionX: float = Field(ge=-10, le=10)
+    positionY: float = Field(ge=-10, le=10)
+    positionZ: float = Field(ge=-10, le=10)
+    rotationYDegrees: float = Field(ge=-180, le=180)
+    scale: float = Field(ge=0.1, le=5)
 
 
 def _is_dev_mode() -> bool:
@@ -425,7 +438,7 @@ def latest_model_artifact(project_id: str) -> dict:
     artifact = model_artifact_repository.get_latest_ready_artifact(project_id)
     if not artifact:
         raise HTTPException(status_code=404, detail="No ready model artifact found")
-    return artifact
+    return _artifact_file_response(project_id, artifact)
 
 
 @app.get("/projects/{project_id}/model-artifacts/{artifact_id}")
@@ -434,6 +447,193 @@ def get_model_artifact(project_id: str, artifact_id: str) -> dict:
     if not artifact:
         raise HTTPException(status_code=404, detail="Model artifact not found")
     return artifact
+
+
+def _artifact_file_response(project_id: str, artifact: dict | None) -> dict | None:
+    if not artifact:
+        return None
+    stored_file_name = Path(artifact.get("primary_file_path") or artifact["storagePath"]).name
+    model_format = (artifact.get("format") or Path(artifact["fileName"]).suffix.lstrip(".")).lower()
+    return {
+        **artifact,
+        "id": artifact["artifactId"],
+        "filename": artifact["fileName"],
+        "format": model_format,
+        "sizeBytes": artifact["fileSize"],
+        "downloadUrl": f"/projects/{project_id}/model-artifacts/{artifact['artifactId']}/download",
+        "fileUrl": f"/projects/{project_id}/model-artifacts/{artifact['artifactId']}/viewer-files/{stored_file_name}",
+    }
+
+
+@app.post("/projects/{project_id}/target-model")
+async def upload_target_model(project_id: str, file: UploadFile = File(...)) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    filename = Path(file.filename or "").name
+    if Path(filename).suffix.lower() not in {".glb", ".obj"}:
+        raise HTTPException(status_code=400, detail="Only .glb and .obj target models are supported")
+    staging = PROCESSED_DIR / project_id / ".target_model_uploads"
+    staging.mkdir(parents=True, exist_ok=True)
+    source = staging / f"{uuid4()}_{filename}"
+    try:
+        source.write_bytes(await file.read())
+        return _artifact_file_response(project_id, model_artifact_service.import_target_model(project_id, source, filename))
+    except model_artifact_service.ModelArtifactError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        source.unlink(missing_ok=True)
+
+
+@app.get("/projects/{project_id}/target-model")
+def get_target_model(project_id: str) -> dict | None:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _artifact_file_response(project_id, model_artifact_repository.get_latest_by_artifact_role(project_id, "target_model"))
+
+
+@app.get("/projects/{project_id}/final-model")
+def get_final_model(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    model = _artifact_file_response(project_id, model_artifact_repository.get_latest_by_artifact_role(project_id, "target_model"))
+    if not model:
+        return {"ready": False, "model": None, "reason": "No target model has been uploaded or promoted yet."}
+    model["source"] = "promoted" if model.get("sourceArtifactId") else "uploaded"
+    return {"ready": True, "model": model}
+
+
+@app.get("/projects/{project_id}/final-model/preflight")
+def get_final_model_preflight(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return final_model_preflight_service.build_preflight(project_id)
+
+
+@app.get("/projects/{project_id}/delivery-manifest")
+def get_delivery_manifest(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    final = get_final_model(project_id)
+    final_model_quality = final_model_preflight_service.compact_summary(
+        final_model_preflight_service.build_preflight(project_id)
+    )
+    model = final["model"]
+    final_item = {
+        "kind": "final_model", "ready": final["ready"], "required": True,
+        **({key: model.get(key) for key in ("filename", "format", "sizeBytes", "downloadUrl") if model.get(key) is not None} if model else {}),
+    }
+    items = [
+        final_item,
+        {"kind": "report", "ready": False, "required": False, "filename": "Report artifact not available"},
+        {"kind": "metadata", "ready": True, "required": False, "filename": "delivery-metadata.json"},
+    ]
+    missing = [item["kind"] for item in items if item["required"] and not item["ready"]]
+    notes = ["No report artifact is currently packaged.", "delivery-metadata.json is generated inside the ZIP at download time."]
+    ready = not missing
+    metadata_preview = {
+        "projectId": project_id,
+        "packageVersion": "1.0",
+        "finalModel": {key: model.get(key) for key in ("id", "filename", "format", "sizeBytes", "source", "createdAt")} if model else None,
+        "items": [{key: item.get(key) for key in ("kind", "ready", "required")} for item in items],
+        "missingRequired": missing,
+    }
+    latest_record = delivery_package_repository.get_latest_package(project_id)
+    latest_package = delivery_package_service.package_record_to_api(latest_record) if latest_record else None
+    return {"ready": ready, "projectId": project_id, "items": items, "missingRequired": missing, "notes": notes,
+            "packageFilename": f"structura-project-{project_id}-delivery.zip", "packageVersion": "1.0",
+            "packageFormatVersion": "1.0", "latestPackage": latest_package,
+            "downloadable": latest_package is not None, "downloadUrl": latest_package["downloadUrl"] if latest_package else None,
+            "metadataPreview": metadata_preview, "finalModelQuality": final_model_quality}
+
+
+@app.get("/projects/{project_id}/delivery-package.zip")
+def download_delivery_package(project_id: str):
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    record = delivery_package_repository.get_latest_package(project_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Delivery package has not been generated yet")
+    return _persisted_delivery_package_response(project_id, record)
+
+
+@app.post("/projects/{project_id}/delivery-packages", status_code=201)
+def generate_delivery_package(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        record = delivery_package_service.generate_persisted_package(project_id, get_delivery_manifest(project_id))
+    except delivery_package_service.DeliveryPackageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return delivery_package_service.package_record_to_api(record)
+
+
+@app.get("/projects/{project_id}/delivery-packages")
+def list_delivery_packages(project_id: str) -> list[dict]:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return [delivery_package_service.package_record_to_api(record) for record in delivery_package_repository.list_packages(project_id)]
+
+
+@app.get("/projects/{project_id}/delivery-packages/{package_id}/download")
+def download_persisted_delivery_package(project_id: str, package_id: str) -> FileResponse:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    record = delivery_package_repository.get_package_for_project(project_id, package_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Delivery package not found")
+    return _persisted_delivery_package_response(project_id, record)
+
+
+def _persisted_delivery_package_response(project_id: str, record: dict) -> FileResponse:
+    path = Path(record["storagePath"]).resolve()
+    managed_root = (PROCESSED_DIR / project_id / "delivery_packages").resolve()
+    if not path.is_file() or managed_root not in path.parents:
+        raise HTTPException(status_code=404, detail="Persisted delivery package file is unavailable")
+    return FileResponse(path, media_type="application/zip", filename=record["filename"])
+
+
+@app.post("/projects/{project_id}/target-model/promote")
+def promote_target_model(project_id: str, payload: TargetModelPromote | None = None) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    source = None
+    if payload and payload.artifactId:
+        source = model_artifact_repository.get_artifact(project_id, payload.artifactId)
+        if not source:
+            raise HTTPException(status_code=404, detail="Generated model artifact was not found in this project")
+    try:
+        return _artifact_file_response(project_id, model_artifact_service.promote_target_model(project_id, source))
+    except model_artifact_service.ModelArtifactError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/projects/{project_id}/target-model")
+def delete_target_model(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    deleted = model_artifact_service.delete_latest_target_model(project_id)
+    return {"deleted": deleted, "message": "Target model deleted" if deleted else "No target model exists"}
+
+
+@app.get("/projects/{project_id}/compare-alignment")
+def get_compare_alignment(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return compare_alignment_repository.get_alignment(project_id)
+
+
+@app.put("/projects/{project_id}/compare-alignment")
+def save_compare_alignment(project_id: str, payload: CompareAlignmentPayload) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return compare_alignment_repository.save_alignment(project_id, payload.model_dump())
+
+
+@app.delete("/projects/{project_id}/compare-alignment")
+def reset_compare_alignment(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return compare_alignment_repository.delete_alignment(project_id)
 
 @app.post("/projects/{project_id}/model-artifacts/{artifact_id}/prepare-preview")
 def prepare_model_preview(project_id: str, artifact_id: str) -> dict:
