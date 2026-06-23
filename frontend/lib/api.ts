@@ -1,4 +1,4 @@
-import type { Annotation, ArtifactComparison, CaptureSummary, CompareAlignment, DeliveryManifest, Diagnostics, ExtractionFpsMode, FinalModelPreflightResponse, FinalModelResponse, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, ModelPreviewDiagnostics, ModelPreviewStatus, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
+import type { Annotation, ArtifactComparison, CaptureSummary, CompareAlignment, DeliveryManifest, DeliveryPackage, Diagnostics, ExtractionFpsMode, FinalModelPreflightResponse, FinalModelResponse, FramePreview, FrameSelectionMode, FrameSelectionPreview, JobProgress, ModelArtifact, ModelArtifactSummary, ModelPreviewDiagnostics, ModelPreviewStatus, PhotogrammetryJob, PointCloudResponse, PreviewMode, ProcessingStatus, Project, RealityScanDiagnostics, RealityScanRunResponse, RealityScanStatus, ReconstructionMatchingMode, ReconstructionSummary, Report, SceneAnalysis, SparseSweepResponse, ViewerTransform, VisualPreviewDiagnostics, VisualPreviewPreset, VisualPreviewSplatMetadata, VisualPreviewSummary, VisualPreviewTrainingStatusResponse } from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -242,6 +242,14 @@ export function getFinalModelPreflight(projectId: string) {
 
 export function getDeliveryManifest(projectId: string) {
   return request<DeliveryManifest>(`/projects/${projectId}/delivery-manifest`);
+}
+
+export function createDeliveryPackage(projectId: string) {
+  return request<DeliveryPackage>(`/projects/${projectId}/delivery-packages`, { method: "POST" });
+}
+
+export function listDeliveryPackages(projectId: string) {
+  return request<DeliveryPackage[]>(`/projects/${projectId}/delivery-packages`);
 }
 
 export function deliveryPackageDownloadUrl(projectId: string) {
