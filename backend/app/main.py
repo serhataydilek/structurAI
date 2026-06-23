@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
-from app.repositories import annotation_repository, capture_repository, compare_alignment_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
+from app.repositories import annotation_repository, capture_repository, compare_alignment_repository, delivery_package_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
 from app.services import comparison_analysis_service, delivery_package_service, final_model_preflight_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
@@ -552,6 +552,38 @@ def download_delivery_package(project_id: str):
     except delivery_package_service.DeliveryPackageError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return StreamingResponse(BytesIO(archive), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})
+
+
+@app.post("/projects/{project_id}/delivery-packages", status_code=201)
+def generate_delivery_package(project_id: str) -> dict:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        record = delivery_package_service.generate_persisted_package(project_id, get_delivery_manifest(project_id))
+    except delivery_package_service.DeliveryPackageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return delivery_package_service.package_record_to_api(record)
+
+
+@app.get("/projects/{project_id}/delivery-packages")
+def list_delivery_packages(project_id: str) -> list[dict]:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return [delivery_package_service.package_record_to_api(record) for record in delivery_package_repository.list_packages(project_id)]
+
+
+@app.get("/projects/{project_id}/delivery-packages/{package_id}/download")
+def download_persisted_delivery_package(project_id: str, package_id: str) -> FileResponse:
+    if not project_repository.get_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    record = delivery_package_repository.get_package_for_project(project_id, package_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Delivery package not found")
+    path = Path(record["storagePath"]).resolve()
+    managed_root = (PROCESSED_DIR / project_id / "delivery_packages").resolve()
+    if not path.is_file() or managed_root not in path.parents:
+        raise HTTPException(status_code=404, detail="Persisted delivery package file is unavailable")
+    return FileResponse(path, media_type="application/zip", filename=record["filename"])
 
 
 @app.post("/projects/{project_id}/target-model/promote")
