@@ -201,6 +201,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertEqual(preflight["finalModel"]["format"], "glb")
         self.assertEqual(preflight["finalModel"]["source"], "uploaded")
         self.assertIsNone(preflight["bundle"])
+        self.assertIsNone(preflight["thumbnail"])
 
     def test_final_model_preflight_warns_for_standalone_obj(self):
         self.upload("final.obj", b"v 0 0 0\n")
@@ -209,7 +210,46 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertTrue(preflight["packageReady"])
         self.assertEqual(preflight["finalModel"]["format"], "obj")
         self.assertEqual(preflight["bundle"], {"mtlFiles": [], "textureFiles": [], "hasMtl": False, "hasTextures": False, "supportedForPackaging": True})
+        self.assertIsNone(preflight["thumbnail"])
         self.assertTrue(any("standalone" in warning for warning in preflight["warnings"]))
+
+    def test_final_model_preflight_detects_glb_thumbnail_sidecar(self):
+        uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00").json()
+        model_path = Path(uploaded["primary_file_path"])
+        thumbnail = model_path.with_name(f"{model_path.stem}.thumbnail.png")
+        thumbnail.write_bytes(b"png")
+        preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
+        self.assertEqual(preflight["thumbnail"], {
+            "exists": True, "filename": thumbnail.name, "format": "png", "sizeBytes": 3,
+            "source": "final_model_sidecar", "supportedForPackaging": True,
+            "fileUrl": f"/projects/{self.project_id}/model-artifacts/{uploaded['artifactId']}/viewer-files/{thumbnail.name}",
+        })
+
+    def test_final_model_preflight_detects_obj_thumbnail_sidecar(self):
+        uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
+        model_path = Path(uploaded["primary_file_path"])
+        thumbnail = model_path.with_name(f"{model_path.stem}.thumbnail.jpg")
+        thumbnail.write_bytes(b"jpg")
+        preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
+        self.assertEqual(preflight["thumbnail"]["format"], "jpg")
+        self.assertEqual(preflight["thumbnail"]["filename"], thumbnail.name)
+
+    def test_final_model_preflight_thumbnail_uses_png_priority(self):
+        uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00").json()
+        model_path = Path(uploaded["primary_file_path"])
+        png = model_path.with_name(f"{model_path.stem}.thumbnail.png")
+        model_path.with_name(f"{model_path.stem}.thumbnail.webp").write_bytes(b"webp")
+        png.write_bytes(b"png")
+        preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
+        self.assertEqual(preflight["thumbnail"]["filename"], png.name)
+
+    def test_final_model_preflight_ignores_wrong_stem_and_thumbnail_directory(self):
+        uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
+        model_path = Path(uploaded["primary_file_path"])
+        (model_path.parent / "other.thumbnail.png").write_bytes(b"png")
+        model_path.with_name(f"{model_path.stem}.thumbnail.webp").mkdir()
+        preflight = self.client.get(f"/projects/{self.project_id}/final-model/preflight").json()
+        self.assertIsNone(preflight["thumbnail"])
 
     def test_final_model_preflight_detects_obj_mtl_companion(self):
         uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
@@ -267,6 +307,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertEqual(manifest["finalModelQuality"]["status"], "missing")
         self.assertFalse(manifest["finalModelQuality"]["packageReady"])
         self.assertIsNone(manifest["finalModelQuality"]["format"])
+        self.assertIsNone(manifest["finalModelQuality"]["thumbnail"])
 
     def test_delivery_manifest_is_ready_with_target_and_resets_after_delete(self):
         uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
@@ -298,6 +339,16 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertEqual(quality["warnings"], [])
         self.assertEqual(quality["blockers"], [])
         self.assertIsNone(quality["bundle"])
+        self.assertIsNone(quality["thumbnail"])
+
+    def test_delivery_manifest_includes_compact_thumbnail_summary(self):
+        uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00").json()
+        model_path = Path(uploaded["primary_file_path"])
+        model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"png")
+        thumbnail = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()["finalModelQuality"]["thumbnail"]
+        self.assertEqual(thumbnail, {"available": True, "format": "png", "sizeBytes": 3, "source": "final_model_sidecar", "supportedForPackaging": True})
+        self.assertNotIn("filename", thumbnail)
+        self.assertNotIn("fileUrl", thumbnail)
 
     def test_delivery_manifest_includes_obj_mtl_bundle_summary(self):
         uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
@@ -349,6 +400,7 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertIn("finalModel", metadata)
         self.assertIn("manifest", metadata)
         self.assertIsNone(metadata["objBundle"])
+        self.assertEqual(metadata["previewImage"], {"included": False})
 
     def test_obj_delivery_zip_includes_companions_and_bundle_metadata(self):
         uploaded = self.upload("final.obj", b"mtllib final.mtl\nv 0 0 0\n").json()
@@ -361,6 +413,7 @@ class TargetModelApiTests(unittest.TestCase):
             self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["objBundle"], {"included": True, "mtlFiles": ["final.mtl"], "textureFiles": ["albedo.png"], "supportedForPackaging": True})
+        self.assertEqual(metadata["previewImage"], {"included": False})
 
     def test_standalone_obj_delivery_zip_remains_valid(self):
         self.upload("final.obj", b"v 0 0 0\n")
@@ -370,6 +423,41 @@ class TargetModelApiTests(unittest.TestCase):
             self.assertEqual(set(package.namelist()), {"final_model.obj", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["objBundle"], {"included": False, "mtlFiles": [], "textureFiles": [], "supportedForPackaging": True})
+        self.assertEqual(metadata["previewImage"], {"included": False})
+
+    def test_glb_delivery_zip_includes_png_thumbnail_and_metadata(self):
+        uploaded = self.upload("final.glb", b"glTF\x02\x00\x00\x00").json()
+        model_path = Path(uploaded["primary_file_path"])
+        model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"png")
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        with zipfile.ZipFile(BytesIO(response.content)) as package:
+            self.assertEqual(set(package.namelist()), {"final_model.glb", "final_model_preview.png", "delivery-metadata.json"})
+            metadata = json.loads(package.read("delivery-metadata.json"))
+        self.assertEqual(metadata["previewImage"], {"included": True, "filename": "final_model_preview.png", "source": "final_model_sidecar", "format": "png", "sizeBytes": 3})
+
+    def test_obj_delivery_zip_includes_companions_and_jpg_thumbnail(self):
+        uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
+        model_path = Path(uploaded["primary_file_path"])
+        (model_path.parent / "final.mtl").write_text("newmtl material\n")
+        (model_path.parent / "albedo.png").write_bytes(b"png")
+        model_path.with_name(f"{model_path.stem}.thumbnail.jpg").write_bytes(b"jpg")
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        with zipfile.ZipFile(BytesIO(response.content)) as package:
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "delivery-metadata.json"})
+            metadata = json.loads(package.read("delivery-metadata.json"))
+        self.assertEqual(metadata["previewImage"]["format"], "jpg")
+        self.assertEqual(metadata["previewImage"]["filename"], "final_model_preview.jpg")
+
+    def test_delivery_zip_prevents_thumbnail_archive_name_collision(self):
+        uploaded = self.upload("final.obj", b"v 0 0 0\n").json()
+        model_path = Path(uploaded["primary_file_path"])
+        (model_path.parent / "final_model_preview.png").write_bytes(b"texture")
+        model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"thumbnail")
+        response = self.client.get(f"/projects/{self.project_id}/delivery-package.zip")
+        with zipfile.ZipFile(BytesIO(response.content)) as package:
+            names = package.namelist()
+            self.assertEqual(names.count("final_model_preview.png"), 1)
+            self.assertEqual(package.read("final_model_preview.png"), b"thumbnail")
 
 
 if __name__ == "__main__":

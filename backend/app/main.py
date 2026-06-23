@@ -468,13 +468,13 @@ def _artifact_file_response(project_id: str, artifact: dict | None) -> dict | No
     }
 
 
-def _safe_obj_companion_files(model_path: Path, bundle: dict | None) -> dict:
+def _safe_obj_companion_files(model_path: Path, bundle: dict | None, reserved_archive_names: set[str] | None = None) -> dict:
     """Keep delivery ZIP companions to safe, direct files beside the final OBJ."""
     result = {"mtlFiles": [], "textureFiles": []}
     if not bundle:
         return result
     companion_root = model_path.parent.resolve()
-    archive_names = {"final_model.obj", "delivery-metadata.json"}
+    archive_names = reserved_archive_names if reserved_archive_names is not None else {"final_model.obj", "delivery-metadata.json"}
     for key in ("mtlFiles", "textureFiles"):
         for file_name in bundle.get(key, []):
             candidate_name = Path(file_name)
@@ -487,6 +487,22 @@ def _safe_obj_companion_files(model_path: Path, bundle: dict | None) -> dict:
             archive_names.add(archive_name.casefold())
             result[key].append((archive_name, candidate))
     return result
+
+
+def _safe_thumbnail_sidecar(model_path: Path, thumbnail: dict | None) -> tuple[str, Path] | None:
+    """Revalidate a preflight thumbnail before adding it to a delivery ZIP."""
+    if not thumbnail or thumbnail.get("format") not in {"png", "jpg", "jpeg", "webp"}:
+        return None
+    file_name = thumbnail.get("filename")
+    candidate_name = Path(file_name) if isinstance(file_name, str) else None
+    if not candidate_name or candidate_name.is_absolute() or candidate_name.name != file_name:
+        return None
+    model_directory = model_path.parent.resolve()
+    expected_name = f"{model_path.stem}.thumbnail.{thumbnail['format']}"
+    candidate = (model_directory / candidate_name).resolve()
+    if candidate_name.name != expected_name or candidate.parent != model_directory or not candidate.is_file():
+        return None
+    return f"final_model_preview.{thumbnail['format']}", candidate
 
 
 @app.post("/projects/{project_id}/target-model")
@@ -582,12 +598,23 @@ def download_delivery_package(project_id: str):
     if extension not in {"glb", "obj"}:
         raise HTTPException(status_code=400, detail="Final model format is not supported for delivery packaging")
     preflight = final_model_preflight_service.build_preflight(project_id)
-    companion_files = _safe_obj_companion_files(path, preflight.get("bundle") if extension == "obj" else None)
+    thumbnail_file = _safe_thumbnail_sidecar(path, preflight.get("thumbnail"))
+    reserved_archive_names = {f"final_model.{extension}".casefold(), "delivery-metadata.json"}
+    if thumbnail_file:
+        reserved_archive_names.add(thumbnail_file[0].casefold())
+    companion_files = _safe_obj_companion_files(path, preflight.get("bundle") if extension == "obj" else None, reserved_archive_names)
     obj_bundle = None if extension != "obj" else {
         "included": bool(companion_files["mtlFiles"] or companion_files["textureFiles"]),
         "mtlFiles": [name for name, _ in companion_files["mtlFiles"]],
         "textureFiles": [name for name, _ in companion_files["textureFiles"]],
         "supportedForPackaging": True,
+    }
+    preview_image = {"included": False} if not thumbnail_file else {
+        "included": True,
+        "filename": thumbnail_file[0],
+        "source": "final_model_sidecar",
+        "format": preflight["thumbnail"]["format"],
+        "sizeBytes": thumbnail_file[1].stat().st_size,
     }
     metadata = {
         "projectId": project_id,
@@ -597,6 +624,7 @@ def download_delivery_package(project_id: str):
         "manifest": {"ready": manifest["ready"], "missingRequired": manifest["missingRequired"], "items": manifest["metadataPreview"]["items"]},
         "notes": manifest["notes"],
         "objBundle": obj_bundle,
+        "previewImage": preview_image,
     }
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
@@ -604,6 +632,8 @@ def download_delivery_package(project_id: str):
         for key in ("mtlFiles", "textureFiles"):
             for archive_name, companion_path in companion_files[key]:
                 package.write(companion_path, archive_name)
+        if thumbnail_file:
+            package.write(thumbnail_file[1], thumbnail_file[0])
         package.writestr("delivery-metadata.json", json.dumps(metadata, indent=2))
     archive.seek(0)
     return StreamingResponse(archive, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})

@@ -10,6 +10,7 @@ from app.repositories import model_artifact_repository
 
 SUPPORTED_FORMATS = {"glb", "obj"}
 TEXTURE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga"}
+THUMBNAIL_EXTENSIONS = ("png", "jpg", "jpeg", "webp")
 DEFAULT_LARGE_MODEL_MB = 250
 
 
@@ -41,8 +42,9 @@ def _obj_bundle(path: Path) -> dict:
         files = [item for item in path.parent.iterdir() if item.is_file()]
     except OSError:
         files = []
+    thumbnail_names = {f"{path.stem}.thumbnail.{extension}" for extension in THUMBNAIL_EXTENSIONS}
     mtl_files = sorted((item.name for item in files if item.suffix.lower() == ".mtl"), key=str.lower)
-    texture_files = sorted((item.name for item in files if item.suffix.lower() in TEXTURE_EXTENSIONS), key=str.lower)
+    texture_files = sorted((item.name for item in files if item.name not in thumbnail_names and item.suffix.lower() in TEXTURE_EXTENSIONS), key=str.lower)
     return {
         "mtlFiles": mtl_files,
         "textureFiles": texture_files,
@@ -50,6 +52,28 @@ def _obj_bundle(path: Path) -> dict:
         "hasTextures": bool(texture_files),
         "supportedForPackaging": True,
     }
+
+
+def _thumbnail_sidecar(project_id: str, artifact: dict, model_path: Path) -> dict | None:
+    """Find one deterministic, direct thumbnail sibling for the active final model."""
+    try:
+        model_directory = model_path.parent.resolve()
+    except OSError:
+        return None
+    for extension in THUMBNAIL_EXTENSIONS:
+        candidate = (model_directory / f"{model_path.stem}.thumbnail.{extension}").resolve()
+        if candidate.parent != model_directory or not candidate.is_file():
+            continue
+        return {
+            "exists": True,
+            "filename": candidate.name,
+            "format": extension,
+            "sizeBytes": candidate.stat().st_size,
+            "source": "final_model_sidecar",
+            "supportedForPackaging": True,
+            "fileUrl": f"/projects/{project_id}/model-artifacts/{artifact['artifactId']}/viewer-files/{candidate.name}",
+        }
+    return None
 
 
 def build_preflight(project_id: str) -> dict:
@@ -68,6 +92,7 @@ def build_preflight(project_id: str) -> dict:
             "status": "missing",
             "finalModel": {"exists": False, "artifactId": None, "filename": None, "format": None, "sizeBytes": None, "source": "unknown"},
             "bundle": None,
+            "thumbnail": None,
             "checks": checks,
             "warnings": [],
             "blockers": [message],
@@ -81,6 +106,7 @@ def build_preflight(project_id: str) -> dict:
     size_bytes = artifact.get("fileSize")
     source = _source(artifact)
     bundle = _obj_bundle(path) if model_format == "obj" else None
+    thumbnail = _thumbnail_sidecar(project_id, artifact, path) if file_available else None
     warnings: list[str] = []
     blockers: list[str] = []
     checks = []
@@ -136,6 +162,7 @@ def build_preflight(project_id: str) -> dict:
             "source": source,
         },
         "bundle": bundle,
+        "thumbnail": thumbnail,
         "checks": checks,
         "warnings": warnings,
         "blockers": blockers,
@@ -147,12 +174,20 @@ def compact_summary(preflight: dict) -> dict:
     """Select the delivery-manifest fields from a full preflight response."""
     final_model = preflight["finalModel"]
     bundle = preflight.get("bundle")
+    thumbnail = preflight.get("thumbnail")
     compact_bundle = None if bundle is None else {
         "hasMtl": bundle["hasMtl"],
         "hasTextures": bundle["hasTextures"],
         "mtlFileCount": len(bundle["mtlFiles"]),
         "textureFileCount": len(bundle["textureFiles"]),
         "supportedForPackaging": bundle["supportedForPackaging"],
+    }
+    compact_thumbnail = None if thumbnail is None else {
+        "available": thumbnail["exists"],
+        "format": thumbnail["format"],
+        "sizeBytes": thumbnail["sizeBytes"],
+        "source": thumbnail["source"],
+        "supportedForPackaging": thumbnail["supportedForPackaging"],
     }
     return {
         "status": preflight["status"],
@@ -163,4 +198,5 @@ def compact_summary(preflight: dict) -> dict:
         "sizeBytes": final_model["sizeBytes"],
         "source": final_model["source"],
         "bundle": compact_bundle,
+        "thumbnail": compact_thumbnail,
     }
