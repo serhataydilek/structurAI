@@ -124,11 +124,13 @@ export type FinalModelPreflightResponse = {
   bundle: FinalModelPreflightBundle | null;
 };
 export type DeliveryFinalModelQualityBundle = { hasMtl: boolean; hasTextures: boolean; mtlFileCount: number; textureFileCount: number; supportedForPackaging: boolean };
+export type DeliveryFinalModelThumbnail = { available: boolean; format: "png" | "jpg" | "jpeg" | "webp"; sizeBytes: number; source: "final_model_sidecar"; supportedForPackaging: boolean };
 export type DeliveryFinalModelQuality = Pick<FinalModelPreflightResponse, "status" | "packageReady" | "warnings" | "blockers"> & {
   format: FinalModelFormat;
   sizeBytes: number | null;
   source: FinalModelSource;
   bundle: DeliveryFinalModelQualityBundle | null;
+  thumbnail?: DeliveryFinalModelThumbnail | null;
 };
 export type FinalModelInfo = ModelArtifact & { source?: FinalModelSource };
 export type FinalModelResponse = { ready: boolean; model: FinalModelInfo | null; reason?: string };
