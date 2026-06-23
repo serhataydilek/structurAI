@@ -1,10 +1,8 @@
 from pathlib import Path
 from io import BytesIO
-from datetime import datetime, timezone
 import json
 import os
 import shutil
-import zipfile
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -15,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.database import PROCESSED_DIR, UPLOADS_DIR, init_db
 from app.repositories import annotation_repository, capture_repository, compare_alignment_repository, media_repository, model_artifact_repository, project_repository, realityscan_job_repository
-from app.services import comparison_analysis_service, final_model_preflight_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
+from app.services import comparison_analysis_service, delivery_package_service, final_model_preflight_service, job_progress_service, model_artifact_service, model_preview_service, processing_service, realityscan_service, reconstruction_service, report_service, visual_preview_service
 
 ALLOWED_IMAGE_PREFIX = "image/"
 ALLOWED_VIDEO_PREFIX = "video/"
@@ -468,43 +466,6 @@ def _artifact_file_response(project_id: str, artifact: dict | None) -> dict | No
     }
 
 
-def _safe_obj_companion_files(model_path: Path, bundle: dict | None, reserved_archive_names: set[str] | None = None) -> dict:
-    """Keep delivery ZIP companions to safe, direct files beside the final OBJ."""
-    result = {"mtlFiles": [], "textureFiles": []}
-    if not bundle:
-        return result
-    companion_root = model_path.parent.resolve()
-    archive_names = reserved_archive_names if reserved_archive_names is not None else {"final_model.obj", "delivery-metadata.json"}
-    for key in ("mtlFiles", "textureFiles"):
-        for file_name in bundle.get(key, []):
-            candidate_name = Path(file_name)
-            if candidate_name.is_absolute() or candidate_name.name != file_name:
-                continue
-            candidate = (companion_root / candidate_name).resolve()
-            archive_name = candidate.name
-            if candidate.parent != companion_root or not candidate.is_file() or archive_name.casefold() in archive_names:
-                continue
-            archive_names.add(archive_name.casefold())
-            result[key].append((archive_name, candidate))
-    return result
-
-
-def _safe_thumbnail_sidecar(model_path: Path, thumbnail: dict | None) -> tuple[str, Path] | None:
-    """Revalidate a preflight thumbnail before adding it to a delivery ZIP."""
-    if not thumbnail or thumbnail.get("format") not in {"png", "jpg", "jpeg", "webp"}:
-        return None
-    file_name = thumbnail.get("filename")
-    candidate_name = Path(file_name) if isinstance(file_name, str) else None
-    if not candidate_name or candidate_name.is_absolute() or candidate_name.name != file_name:
-        return None
-    model_directory = model_path.parent.resolve()
-    expected_name = f"{model_path.stem}.thumbnail.{thumbnail['format']}"
-    candidate = (model_directory / candidate_name).resolve()
-    if candidate_name.name != expected_name or candidate.parent != model_directory or not candidate.is_file():
-        return None
-    return f"final_model_preview.{thumbnail['format']}", candidate
-
-
 @app.post("/projects/{project_id}/target-model")
 async def upload_target_model(project_id: str, file: UploadFile = File(...)) -> dict:
     if not project_repository.get_project(project_id):
@@ -586,57 +547,11 @@ def get_delivery_manifest(project_id: str) -> dict:
 @app.get("/projects/{project_id}/delivery-package.zip")
 def download_delivery_package(project_id: str):
     manifest = get_delivery_manifest(project_id)
-    if not manifest["ready"]:
-        raise HTTPException(status_code=400, detail="Delivery package is not ready; a final model is required")
-    artifact = model_artifact_repository.get_latest_by_artifact_role(project_id, "target_model")
-    path = Path(artifact.get("primary_file_path") or artifact["storagePath"]).resolve() if artifact else None
-    managed_root = (PROCESSED_DIR / project_id / "target_models").resolve()
-    if not path or not path.is_file() or managed_root not in path.parents:
-        raise HTTPException(status_code=404, detail="Final model file is unavailable for delivery packaging")
-    final = get_final_model(project_id)["model"]
-    extension = (final.get("format") or path.suffix.lstrip(".")).lower()
-    if extension not in {"glb", "obj"}:
-        raise HTTPException(status_code=400, detail="Final model format is not supported for delivery packaging")
-    preflight = final_model_preflight_service.build_preflight(project_id)
-    thumbnail_file = _safe_thumbnail_sidecar(path, preflight.get("thumbnail"))
-    reserved_archive_names = {f"final_model.{extension}".casefold(), "delivery-metadata.json"}
-    if thumbnail_file:
-        reserved_archive_names.add(thumbnail_file[0].casefold())
-    companion_files = _safe_obj_companion_files(path, preflight.get("bundle") if extension == "obj" else None, reserved_archive_names)
-    obj_bundle = None if extension != "obj" else {
-        "included": bool(companion_files["mtlFiles"] or companion_files["textureFiles"]),
-        "mtlFiles": [name for name, _ in companion_files["mtlFiles"]],
-        "textureFiles": [name for name, _ in companion_files["textureFiles"]],
-        "supportedForPackaging": True,
-    }
-    preview_image = {"included": False} if not thumbnail_file else {
-        "included": True,
-        "filename": thumbnail_file[0],
-        "source": "final_model_sidecar",
-        "format": preflight["thumbnail"]["format"],
-        "sizeBytes": thumbnail_file[1].stat().st_size,
-    }
-    metadata = {
-        "projectId": project_id,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "packageVersion": manifest["packageVersion"],
-        "finalModel": manifest["metadataPreview"]["finalModel"],
-        "manifest": {"ready": manifest["ready"], "missingRequired": manifest["missingRequired"], "items": manifest["metadataPreview"]["items"]},
-        "notes": manifest["notes"],
-        "objBundle": obj_bundle,
-        "previewImage": preview_image,
-    }
-    archive = BytesIO()
-    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
-        package.write(path, f"final_model.{extension}")
-        for key in ("mtlFiles", "textureFiles"):
-            for archive_name, companion_path in companion_files[key]:
-                package.write(companion_path, archive_name)
-        if thumbnail_file:
-            package.write(thumbnail_file[1], thumbnail_file[0])
-        package.writestr("delivery-metadata.json", json.dumps(metadata, indent=2))
-    archive.seek(0)
-    return StreamingResponse(archive, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})
+    try:
+        archive, _ = delivery_package_service.build_delivery_package(project_id, manifest)
+    except delivery_package_service.DeliveryPackageError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return StreamingResponse(BytesIO(archive), media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="structura-project-{project_id}-delivery.zip"'})
 
 
 @app.post("/projects/{project_id}/target-model/promote")

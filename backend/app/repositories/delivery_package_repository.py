@@ -30,8 +30,10 @@ def create_package(
     relative_path: str,
     size_bytes: int,
     metadata: dict[str, Any],
+    *,
+    package_id: str | None = None,
 ) -> dict[str, Any]:
-    package_id = str(uuid4())
+    package_id = package_id or str(uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute(
