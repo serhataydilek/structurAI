@@ -305,6 +305,10 @@ class TargetModelApiTests(unittest.TestCase):
         self.assertFalse(manifest["ready"])
         self.assertIn("final_model", manifest["missingRequired"])
         self.assertEqual(next(item for item in manifest["items"] if item["kind"] == "metadata")["ready"], True)
+        report = next(item for item in manifest["items"] if item["kind"] == "report")
+        self.assertEqual(report, {"kind": "report", "ready": True, "required": False, "filename": "report.md", "format": "md", "contentType": "text/markdown; charset=utf-8", "generatedWithPackage": True})
+        self.assertNotIn("downloadUrl", report)
+        self.assertNotIn("No report artifact is currently packaged.", manifest["notes"])
         self.assertEqual(manifest["packageVersion"], "1.0")
         self.assertFalse(manifest["downloadable"])
         self.assertIsNone(manifest["downloadUrl"])
@@ -416,7 +420,7 @@ class TargetModelApiTests(unittest.TestCase):
         response = self.download_latest_delivery_package()
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["objBundle"], {"included": True, "mtlFiles": ["final.mtl"], "textureFiles": ["albedo.png"], "supportedForPackaging": True})
         self.assertEqual(metadata["previewImage"], {"included": False})
@@ -426,7 +430,7 @@ class TargetModelApiTests(unittest.TestCase):
         response = self.download_latest_delivery_package()
         self.assertEqual(response.status_code, 200)
         with zipfile.ZipFile(BytesIO(response.content)) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.obj", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["objBundle"], {"included": False, "mtlFiles": [], "textureFiles": [], "supportedForPackaging": True})
         self.assertEqual(metadata["previewImage"], {"included": False})
@@ -437,7 +441,7 @@ class TargetModelApiTests(unittest.TestCase):
         model_path.with_name(f"{model_path.stem}.thumbnail.png").write_bytes(b"png")
         response = self.download_latest_delivery_package()
         with zipfile.ZipFile(BytesIO(response.content)) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.glb", "final_model_preview.png", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.glb", "final_model_preview.png", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["previewImage"], {"included": True, "filename": "final_model_preview.png", "source": "final_model_sidecar", "format": "png", "sizeBytes": 3})
 
@@ -449,7 +453,7 @@ class TargetModelApiTests(unittest.TestCase):
         model_path.with_name(f"{model_path.stem}.thumbnail.jpg").write_bytes(b"jpg")
         response = self.download_latest_delivery_package()
         with zipfile.ZipFile(BytesIO(response.content)) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["previewImage"]["format"], "jpg")
         self.assertEqual(metadata["previewImage"]["filename"], "final_model_preview.jpg")

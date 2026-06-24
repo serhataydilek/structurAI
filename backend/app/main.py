@@ -524,11 +524,12 @@ def get_delivery_manifest(project_id: str) -> dict:
     }
     items = [
         final_item,
-        {"kind": "report", "ready": False, "required": False, "filename": "Report artifact not available"},
+        {"kind": "report", "ready": True, "required": False, "filename": "report.md", "format": "md",
+         "contentType": "text/markdown; charset=utf-8", "generatedWithPackage": True},
         {"kind": "metadata", "ready": True, "required": False, "filename": "delivery-metadata.json"},
     ]
     missing = [item["kind"] for item in items if item["required"] and not item["ready"]]
-    notes = ["No report artifact is currently packaged.", "delivery-metadata.json is generated inside the ZIP at download time."]
+    notes = ["report.md is generated inside each newly created delivery package.", "delivery-metadata.json is generated inside the ZIP at package generation time."]
     ready = not missing
     metadata_preview = {
         "projectId": project_id,

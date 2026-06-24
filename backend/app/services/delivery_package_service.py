@@ -12,7 +12,7 @@ import zipfile
 
 from app import database
 from app.repositories import delivery_package_repository, model_artifact_repository, project_repository
-from app.services import final_model_preflight_service
+from app.services import final_model_preflight_service, report_artifact_service, report_service
 
 
 class DeliveryPackageError(Exception):
@@ -73,9 +73,18 @@ def build_delivery_package(project_id: str, manifest: dict, package_identity: di
     if extension not in {"glb", "obj"}:
         raise DeliveryPackageError(400, "Final model format is not supported for delivery packaging")
 
+    report = report_service.build_report(project_id)
+    if report is None:
+        raise DeliveryPackageError(404, "Project report is unavailable for delivery packaging")
+    report_content, report_artifact = report_artifact_service.build_report_markdown(
+        report,
+        manifest,
+        package_identity or {},
+        datetime.now(timezone.utc),
+    )
     preflight = final_model_preflight_service.build_preflight(project_id)
     thumbnail_file = _safe_thumbnail_sidecar(path, preflight.get("thumbnail"))
-    reserved_archive_names = {f"final_model.{extension}".casefold(), "delivery-metadata.json"}
+    reserved_archive_names = {f"final_model.{extension}".casefold(), "report.md", "delivery-metadata.json"}
     if thumbnail_file:
         reserved_archive_names.add(thumbnail_file[0].casefold())
     companion_files = _safe_obj_companion_files(path, preflight.get("bundle") if extension == "obj" else None, reserved_archive_names)
@@ -101,9 +110,10 @@ def build_delivery_package(project_id: str, manifest: dict, package_identity: di
         "notes": manifest["notes"],
         "objBundle": obj_bundle,
         "previewImage": preview_image,
+        "reportArtifact": report_artifact,
     }
     if package_identity:
-        metadata["package"] = package_identity
+        metadata["package"] = {key: package_identity[key] for key in ("id", "version") if key in package_identity}
 
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as package:
@@ -113,6 +123,7 @@ def build_delivery_package(project_id: str, manifest: dict, package_identity: di
                 package.write(companion_path, archive_name)
         if thumbnail_file:
             package.write(thumbnail_file[1], thumbnail_file[0])
+        package.writestr(report_artifact["filename"], report_content)
         package.writestr("delivery-metadata.json", json.dumps(metadata, indent=2))
     return archive.getvalue(), metadata
 
@@ -122,7 +133,7 @@ def generate_persisted_package(project_id: str, manifest: dict) -> dict:
     version = delivery_package_repository.get_next_version(project_id)
     package_id = str(uuid4())
     filename = f"structura-project-{project_id}-delivery-v{version:04d}.zip"
-    metadata_identity = {"id": package_id, "version": version}
+    metadata_identity = {"id": package_id, "version": version, "filename": filename}
     archive, metadata = build_delivery_package(project_id, manifest, metadata_identity)
     package_directory = database.PROCESSED_DIR / project_id / "delivery_packages" / package_id
     final_path = package_directory / filename
@@ -153,7 +164,7 @@ def generate_persisted_package(project_id: str, manifest: dict) -> dict:
 def package_record_to_api(record: dict) -> dict:
     package_id = record["packageId"]
     project_id = record["projectId"]
-    return {
+    result = {
         "id": package_id,
         "projectId": project_id,
         "version": record["version"],
@@ -162,3 +173,7 @@ def package_record_to_api(record: dict) -> dict:
         "createdAt": record["createdAt"],
         "downloadUrl": f"/projects/{project_id}/delivery-packages/{package_id}/download",
     }
+    report_artifact = (record.get("metadata") or {}).get("reportArtifact")
+    if isinstance(report_artifact, dict):
+        result["reportArtifact"] = report_artifact
+    return result
