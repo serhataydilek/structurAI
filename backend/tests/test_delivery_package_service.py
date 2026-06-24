@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import time
 import unittest
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from app import database, main
 from app.repositories import delivery_package_repository
-from app.services import delivery_package_service, model_artifact_service
+from app.services import delivery_package_service, model_artifact_service, report_artifact_service
 
 
 class DeliveryPackageServiceTests(unittest.TestCase):
@@ -66,11 +67,20 @@ class DeliveryPackageServiceTests(unittest.TestCase):
             "id": record["packageId"], "projectId": self.project_id, "version": 1,
             "filename": record["filename"], "sizeBytes": record["sizeBytes"], "createdAt": record["createdAt"],
             "downloadUrl": f"/projects/{self.project_id}/delivery-packages/{record['packageId']}/download",
+            "reportArtifact": record["metadata"]["reportArtifact"],
         })
         with zipfile.ZipFile(path) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.glb", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.glb", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
+            report_content = package.read("report.md")
         self.assertEqual(metadata["package"], {"id": record["packageId"], "version": 1})
+        self.assertEqual(metadata["reportArtifact"], {
+            "filename": "report.md",
+            "format": "md",
+            "contentType": "text/markdown; charset=utf-8",
+            "sizeBytes": len(report_content),
+            "sha256": hashlib.sha256(report_content).hexdigest(),
+        })
         self.assertEqual(record["metadata"], metadata)
 
     def test_generates_obj_bundle_preview_snapshot(self):
@@ -83,10 +93,11 @@ class DeliveryPackageServiceTests(unittest.TestCase):
         record = self.generate()
 
         with zipfile.ZipFile(record["storagePath"]) as package:
-            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "delivery-metadata.json"})
+            self.assertEqual(set(package.namelist()), {"final_model.obj", "final.mtl", "albedo.png", "final_model_preview.jpg", "report.md", "delivery-metadata.json"})
             metadata = json.loads(package.read("delivery-metadata.json"))
         self.assertEqual(metadata["previewImage"]["filename"], "final_model_preview.jpg")
         self.assertEqual(metadata["objBundle"]["textureFiles"], ["albedo.png"])
+        self.assertEqual(metadata["reportArtifact"]["filename"], "report.md")
 
     def test_consecutive_generations_create_version_history(self):
         self.upload("final.glb", b"glTF\x02\x00\x00\x00")
@@ -105,6 +116,17 @@ class DeliveryPackageServiceTests(unittest.TestCase):
             delivery_package_service.generate_persisted_package(self.project_id, manifest)
 
         self.assertEqual(context.exception.status_code, 400)
+        self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
+        self.assertFalse((database.PROCESSED_DIR / self.project_id / "delivery_packages").exists())
+
+    def test_report_rendering_failure_does_not_persist_package_or_file(self):
+        self.upload("final.glb", b"glTF\x02\x00\x00\x00")
+        manifest = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
+
+        with patch.object(report_artifact_service, "build_report_markdown", side_effect=RuntimeError("render failed")):
+            with self.assertRaisesRegex(RuntimeError, "render failed"):
+                delivery_package_service.generate_persisted_package(self.project_id, manifest)
+
         self.assertEqual(delivery_package_repository.list_packages(self.project_id), [])
         self.assertFalse((database.PROCESSED_DIR / self.project_id / "delivery_packages").exists())
 

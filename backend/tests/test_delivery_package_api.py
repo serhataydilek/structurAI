@@ -114,6 +114,8 @@ class DeliveryPackageApiTests(unittest.TestCase):
         self.assertEqual(before["packageFormatVersion"], "1.0")
 
         first = self.generate()
+        self.assertEqual(first["reportArtifact"]["filename"], "report.md")
+        self.assertEqual(first["reportArtifact"]["format"], "md")
         first_record = delivery_package_repository.get_package(first["id"])
         first_bytes = Path(first_record["storagePath"]).read_bytes()
         thumbnail.write_bytes(b"changed-preview")
@@ -128,11 +130,29 @@ class DeliveryPackageApiTests(unittest.TestCase):
         self.assertTrue(manifest["downloadable"])
         self.assertEqual(manifest["downloadUrl"], first["downloadUrl"])
         self.assertEqual(manifest["latestPackage"], first)
+        self.assertEqual(manifest["latestPackage"]["reportArtifact"], first_record["metadata"]["reportArtifact"])
 
         second = self.generate()
         latest_manifest = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
         self.assertEqual(latest_manifest["latestPackage"], second)
         self.assertEqual(latest_manifest["downloadUrl"], second["downloadUrl"])
+
+    def test_manifest_omits_report_artifact_for_legacy_package_metadata(self):
+        record = delivery_package_repository.create_package(
+            self.project_id,
+            1,
+            "legacy.zip",
+            "C:/legacy.zip",
+            "legacy.zip",
+            1,
+            {"package": {"id": "legacy", "version": 1}},
+            package_id="legacy",
+        )
+
+        manifest = self.client.get(f"/projects/{self.project_id}/delivery-manifest").json()
+
+        self.assertEqual(manifest["latestPackage"]["id"], record["packageId"])
+        self.assertNotIn("reportArtifact", manifest["latestPackage"])
 
     def test_legacy_route_returns_not_found_before_package_generation(self):
         self.upload("final.glb", b"glTF\x02\x00\x00\x00")
